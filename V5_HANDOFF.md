@@ -7,8 +7,7 @@ Nothing has been pushed to GitHub or deployed. Everything is local and on branch
 - `companion-v5.html`: no live indicator, fits on a phone without scrolling, "Orbital Period" and "Rev / Day" labels.
 - Worker reference code (`crowded-sky-worker/worker.js`), which still needs deploying with a new key.
 
-## Look we settled on (currently test layers in Chrome, not in the file yet)
-These live in Chrome's localStorage on art.ashleyzelinskie.com (keys `__v5…`). Tab "A · soft dots" applies them on top of v5. Don't clear site data for art.ashleyzelinskie.com.
+## Look we settled on (built into autonomous-v5.html, 12 Nov: see `applyExhibitionLook()` at the end of the file)
 - Soft relief dots that press into a grey ground. Pricks of light at the centres: gov blue [0.40,0.64,1.00], private copper [0.96,0.58,0.26], prospective white. Debris is three black dots on its own layer beneath the colour.
 - Dynamic sizing: bigger when zoomed out, smaller when zoomed in. Thinned and hazed in the overview so it isn't mushy.
 - Shiny bronze gradient for everything that was red (reticle, timeline, TODAY, info toggle).
@@ -19,7 +18,7 @@ These live in Chrome's localStorage on art.ashleyzelinskie.com (keys `__v5…`).
 
 ## Next steps
 1. Large screen: get the specs (resolution, physical size, viewing distance, and which computer drives it). Check 4K frame rate and render the relief at reduced resolution if needed.
-2. Fold all the test layers into `autonomous-v5.html` and `companion-v5.html` properly, then re-run the tests.
+2. Done 12 Nov: the look is built into `autonomous-v5.html` as one block. Later this could be merged into the main code instead of being patched on at load.
 3. Open questions:
    - Deepen the copper in dense areas?
    - The "SCANNING / TRANSMITTING" state text: move it into the tray, or remove it?

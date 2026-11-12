@@ -2092,5 +2092,626 @@ window.addEventListener('touchend',  () => {
 });
 onResize(); // run once on load
 </script>
+
+<script>
+// ════════════════════════════════════════════════════════════════════════════
+// Exhibition look for The Weight of Space (v5): greyscale relief, bronze, points
+// of coloured light. Changes only the look; behaviour, data and timeline untouched.
+// Applied once, after the catalog has loaded.
+// ════════════════════════════════════════════════════════════════════════════
+function applyExhibitionLook(){
+  // ── palette + info tray identical to the companion ──
+// Aesthetic test layer for Crowded Sky v5 — runs inside a live v5 page, changes only the look.
+// Behaviour (observer, timeline, data, orbit-line geometry) is untouched.
+// window.__applyStyle('softdots' | 'palette')
+window.__applyStyle = function(variant){
+  // ── Palette from the exhibition mood board ─────────────────────────────
+  const PAL = {
+    gov:    [0.56, 0.69, 0.89],   // mood-board blue   #8FB0E3
+    priv:   [0.77, 0.54, 0.33],   // copper / bronze   #C48A55
+    debris: [0.50, 0.51, 0.54],   // grey              #80828A
+    proj:   [0.86, 0.88, 0.92],   // chrome / silver   #DBE0EB
+  };
+  const CSS = { gov:'#8FB0E3', priv:'#C48A55', debris:'#8A8F99', proj:'#DBE0EB' };
+
+  // ── Dot colours: catalog, early satellites, projections (also after daily refresh) ──
+  typeColor = t => t===2 ? PAL.debris : t===1 ? PAL.gov : PAL.priv;
+  const recolour = () => {
+    objects.forEach(o => o.col = typeColor(o.type));
+    EARLY_SATS.forEach(e => e.col = PAL.gov);
+    PROJ_OBJS.forEach(o => o.col = PAL.proj);
+    lastRingCount = -1; rebuildGeometry();
+  };
+  const _ip = initProjectedSatellites;
+  initProjectedSatellites = function(){ _ip(); PROJ_OBJS.forEach(o => o.col = PAL.proj); };
+  recolour();
+  // target glow: neutral white instead of warm gold
+  thlMat.fragmentShader = thlMat.fragmentShader.replace('vec4(1.,0.90,0.60,', 'vec4(1.,0.98,0.95,');
+  thlMat.needsUpdate = true;
+
+  // ── Variant A: soft-dot relief (after the "Soft dots" study) ─────────────
+  if (variant === 'softdots') {
+    pMat.uniforms.sizeMul = { value: 1.7 };
+    pMat.vertexShader = pMat.vertexShader
+      .replace('uniform float uTime;', 'uniform float uTime;\n  uniform float sizeMul;')
+      .replace('gl_PointSize=finalSize*(680./-mv.z);', 'gl_PointSize=finalSize*sizeMul*(680./-mv.z);')
+      .replace('float pulse = 1.0 + 0.35 * noise;', 'float pulse = 1.0 + 0.08 * noise;')   // calmer: the relief carries the form
+      .replace('float spike = max(0., snoise2(vec2(ph*3.14+uTime*0.8, uTime*0.6)))*0.22;', 'float spike = 0.0;');
+    pMat.fragmentShader = `
+      varying vec3 vC; varying float vRim; varying float vIsDebris;
+      // one soft mound: height falls from a crisp centre to a flat edge; lit by one light (upper left)
+      vec4 mound(vec2 q, float r){
+        float d = length(q) / r;
+        if (d > 1.0) return vec4(0.0);
+        float g = 1.6 * pow(max(1.0 - d, 0.0), 0.6) / r;            // slope of h = (1-d)^1.6
+        vec2 grad = -normalize(q + 1e-5) * g;
+        vec3 n = normalize(vec3(-grad * 0.11, 1.0));
+        vec3 L = normalize(vec3(-0.55, 0.50, 0.68));
+        float diff = clamp(dot(n, L), 0.0, 1.0);
+        float spec = pow(diff, 28.0) * (1.0 - d);                    // small metallic glint near the crown
+        vec3 col = vC * (0.18 + 1.05 * diff) + vec3(spec * 0.35);
+        float a = smoothstep(1.0, 0.72, d);
+        return vec4(col, a);
+      }
+      void main(){
+        vec2 u = gl_PointCoord - 0.5; u.y = -u.y;
+        vec4 c;
+        if (vIsDebris > 0.5) {                                        // debris: three small mounds
+          vec2 c1 = vec2(0.0, 0.19), c2 = vec2(-0.17, -0.10), c3 = vec2(0.17, -0.10);
+          vec2 q = u - c1; if (length(u - c2) < length(q)) q = u - c2; if (length(u - c3) < length(q)) q = u - c3;
+          c = mound(q, 0.13);
+        } else {
+          c = mound(u, 0.5);
+        }
+        if (c.a <= 0.0) discard;
+        gl_FragColor = vec4(c.rgb, c.a * 0.95);
+      }`;
+    pMat.blending = THREE.NormalBlending;   // shadows must be able to darken
+    pMat.needsUpdate = true;
+  }
+
+  // ── Info box: same layout and type as the companion app ─────────────────
+  const doc = document, st = doc.createElement('style');
+  st.textContent = `
+  #data-panel{background:rgba(0,0,0,0.9)!important;border-left:1px solid rgba(255,255,255,0.08)!important;
+    padding:28px 24px!important;justify-content:flex-start!important;font-family:'Courier New',monospace;backdrop-filter:none!important}
+  #data-panel .cp-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+  #data-panel .cp-badge{font-size:8px;letter-spacing:.28em;text-transform:uppercase;padding:4px 10px;border-radius:2px;border:1px solid currentColor;opacity:.8}
+  #data-panel .cp-year{font-size:9px;letter-spacing:.25em;color:rgba(255,255,255,0.45);text-transform:uppercase}
+  #data-panel .cp-name{font-size:24px;letter-spacing:.05em;text-transform:uppercase;color:#fff;line-height:1.15;margin-bottom:5px;word-break:break-word}
+  #data-panel .cp-norad{font-size:9px;letter-spacing:.3em;color:rgba(255,255,255,0.32);margin-bottom:16px;text-transform:uppercase}
+  #data-panel .cp-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:11px 12px;border-top:1px solid rgba(255,255,255,0.08);padding-top:14px}
+  #data-panel .cp-f.w2{grid-column:span 2} #data-panel .cp-f.w3{grid-column:span 3}
+  #data-panel .cp-l{font-size:7px;letter-spacing:.25em;text-transform:uppercase;color:rgba(255,255,255,0.32);margin-bottom:3px}
+  #data-panel .cp-v{font-size:12px;letter-spacing:.03em;color:rgba(255,255,255,0.88);line-height:1.35;overflow-wrap:anywhere}
+  #data-panel .cp-warn{font-size:7.5px;letter-spacing:.2em;text-transform:uppercase;color:rgba(255,255,255,0.75);margin-top:14px;padding:6px 9px;border:1px solid rgba(255,255,255,0.25)}
+  #data-panel .cp-proj{font-size:7.5px;letter-spacing:.18em;text-transform:uppercase;line-height:1.6;color:${CSS.proj};opacity:.7;margin-top:10px}
+  #data-panel .cp-note{font-size:11px;letter-spacing:.02em;line-height:1.6;color:rgba(255,255,255,0.42);margin-top:14px;border-top:1px solid rgba(255,255,255,0.07);padding-top:12px}`;
+  doc.head.appendChild(st);
+
+  const esc2 = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  function cardFor(obj){   // the same fields writeTargetToWorker sends to the companion
+    const meta = getMeta(obj.norad), inf = inferFields(obj);
+    return { norad: obj.norad, name: obj.name, type: obj.type, alt: obj.alt ? Math.round(obj.alt) : null,
+      period: obj.mm ? (1440/obj.mm).toFixed(1) : null, inc: obj.inc ? (obj.inc*180/Math.PI).toFixed(2) : null,
+      ecc: obj.ecc ? obj.ecc.toFixed(6) : null, raan: obj.raan ? (obj.raan*180/Math.PI).toFixed(2) : null,
+      mm: obj.mm ? obj.mm.toFixed(8) : null, m0: obj.M0 ? (obj.M0*180/Math.PI).toFixed(4) : null,
+      epoch: obj.epoch_ms ? new Date(obj.epoch_ms).toISOString().slice(0,19).replace('T',' ')+' UTC' : null,
+      country: meta?.country || inf.country, launched: meta?.launched || inf.launched,
+      purpose: meta?.purpose || inferPurpose(obj.name) || (obj.type===2 ? 'TRACKABLE DEBRIS' : null),
+      note: meta?.note || null, sim_year: new Date(simTime).getUTCFullYear(), projected: false,
+      warning: obj.type===2 ? 'TRACKABLE DEBRIS — UNCONTROLLED OBJECT' : (obj.alt && obj.alt<600) ? 'LOW ORBIT — ELEVATED COLLISION RISK ZONE' : null };
+  }
+  function renderCard(d){
+    const proj = d.projected === true;
+    const [label, colr] = proj ? ['PROJECTED', CSS.proj] : d.type===2 ? ['DEBRIS', CSS.debris] : d.type===1 ? ['GOVERNMENT', CSS.gov] : ['COMMERCIAL', CSS.priv];
+    const yr = d.sim_year, now = new Date().getFullYear();
+    const era = yr > now ? 'PROJECTED · '+yr : yr < now ? 'HISTORICAL · '+yr : 'PRESENT · '+yr;
+    const f = (l, v, w='') => `<div class="cp-f ${w}"><div class="cp-l">${esc2(l)}</div><div class="cp-v">${esc2(v ?? '—')}</div></div>`;
+    const deg = v => v != null && v !== '' ? v+'°' : '—';
+    document.getElementById('data-panel').innerHTML = `
+      <div class="cp-top"><div class="cp-badge" style="color:${colr}">${label}</div><div class="cp-year">${esc2(era)}</div></div>
+      <div class="cp-name">${esc2(d.name || '—')}</div>
+      <div class="cp-norad">${esc2(proj ? 'NOT YET CATALOGUED' + (d.constellation ? '  ·  '+d.constellation : '') : (d.norad ? 'NORAD  '+d.norad : ''))}</div>
+      <div class="cp-grid">
+        ${f('Purpose', d.purpose, 'w3')}${f('Country / Operator', d.country, 'w2')}${f('Launched', d.launched)}
+        ${f('Altitude', d.alt ? Number(d.alt).toLocaleString()+' km' : null)}${f('Orbital Period', d.period ? d.period+' min' : null)}${f('Inclination', deg(d.inc))}
+        ${f('Eccentricity', d.ecc)}${f('RAAN', deg(d.raan))}${f('Mean Anomaly', deg(d.m0))}
+        ${f('Rev / Day', d.mm)}${f('Epoch', d.epoch, 'w2')}
+      </div>
+      ${d.warning ? `<div class="cp-warn">⚠ ${esc2(d.warning)}</div>` : ''}
+      ${proj ? `<div class="cp-proj">⚠ This object does not exist yet — projected from constellation filings. All data is speculative.</div>` : ''}
+      ${d.note ? `<div class="cp-note">${esc2(d.note)}</div>` : ''}`;
+  }
+  buildDataPanel = obj => renderCard(cardFor(obj));
+  buildProjectedDataPanel = obj => { const pd = generateProjectedData(obj); currentProjectedData = pd; renderCard(pd); };
+  if (!infoMode) document.getElementById('info-toggle').click();   // show the box for this review
+  if (currentTarget && (state===S.INSPECT || state===S.ZOOM_IN)) (currentTarget.isProjected ? buildProjectedDataPanel : buildDataPanel)(currentTarget);
+  return variant + ' applied';
+};
+  __applyStyle('softdots');
+
+  // ── polished bronze accents + full-catalog binary column ──
+// Runs inside a live v5 page: polished-bronze UI accents (replacing red) + full-catalog binary column.
+window.__bronzeAndBinary = function(){
+  // ── 1. Polished bronze instead of red ──────────────────────────────────────
+  const st = document.createElement('style');
+  st.textContent = `
+  :root{
+    --bz-grad: linear-gradient(110deg,#6e4421 0%,#b98146 18%,#f6dcae 34%,#c48d53 48%,#ecc792 64%,#8f5d2f 82%,#d9a96f 100%);
+    --bz: #c99559; --bz-hi: #f6dcae;
+  }
+  @keyframes bzSheen{0%{background-position:0% 50%}100%{background-position:200% 50%}}
+  /* metal text: gradient clipped to the letters, with a slow moving highlight */
+  #reticle-label,#reticle-norad,#state-label,#tl-today-label,#tl-era,#new-obj-banner{
+    background:var(--bz-grad);background-size:200% 100%;-webkit-background-clip:text;background-clip:text;
+    color:transparent!important;animation:bzSheen 7s linear infinite;opacity:.95}
+  #reticle-norad,#state-label,#tl-era{opacity:.75}
+  /* reticle corners and crosshair */
+  #reticle .corner{border-image:var(--bz-grad) 1!important;filter:drop-shadow(0 0 2px rgba(246,220,174,.35))}
+  #reticle-h,#reticle-v{background:var(--bz-grad)!important;background-size:200% 100%!important}
+  #reticle-dot{box-shadow:0 0 6px 2px rgba(246,220,174,.9),0 0 14px 5px rgba(201,149,89,.45)!important}
+  /* timeline TODAY marker */
+  #tl-today{background:var(--bz-grad)!important;box-shadow:0 0 4px rgba(246,220,174,.55)}
+  /* info button */
+  #info-toggle.active{border-color:var(--bz)!important}
+  #info-toggle.active svg{stroke:var(--bz-hi)!important}
+  /* new-object banner frame */
+  #new-obj-banner{border:1px solid transparent!important;border-image:var(--bz-grad) 1!important}
+  /* binary column: driven by script now, not the CSS loop */
+  #binary-inner{animation:none!important}`;
+  document.head.appendChild(st);
+
+  // ── 2. Binary column: every object in the catalog, streamed ────────────────
+  const inner = document.getElementById('binary-inner');
+  const LINE = 6.5 * 1.7;                 // font-size × line-height, as in the original
+  const SPEED = 36.8;                      // px per second — the original scroll speed
+  const toBin = (n, b) => (Math.abs(n) >>> 0).toString(2).padStart(b, '0');
+  const line = o => toBin(o.norad || 0, 17) + ' ' + toBin(Math.round(o.alt) || 0, 14) + ' ' + toBin(Math.round((o.inc || 0) * 1000), 16);
+  buildBinaryScroll = function(){ /* replaced by the streaming column below */ };
+  let offset = 0, last = performance.now(), shownStart = -1;
+  function frame(now){
+    const n = objects.length;
+    if (n) {
+      offset += SPEED * Math.min(0.1, (now - last) / 1000);
+      const start = Math.floor(offset / LINE) % n;
+      const rows = Math.ceil(innerHeight / LINE) + 2;
+      if (start !== shownStart) {
+        let s = '';
+        for (let i = 0; i < rows; i++) s += line(objects[(start + i) % n]) + '\n';
+        inner.textContent = s;
+        shownStart = start;
+      }
+      inner.style.transform = `translateY(${-(offset % LINE)}px)`;
+    }
+    last = now;
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+  return 'bronze accents + full-catalog binary applied (' + objects.length + ' objects)';
+};
+  __bronzeAndBinary();
+
+  // ── notice position ──
+(function(){const b=document.getElementById('new-obj-banner'); b.style.top='auto'; b.style.left='auto'; b.style.transform='none'; b.style.bottom='124px'; b.style.right='20px'; return 'moved'})();
+
+  // ── soft relief dots pressed into the ground ──
+// Relief rendering for Crowded Sky v5 (after the "Soft dots" study): every object adds a soft mound to
+// one screen-space height map; that single surface is lit with one light and shown in greyscale on a
+// graphite ground, so neighbouring mounds merge with creases instead of overlapping as separate sprites.
+// Runs inside a live v5 page. Orbit lines, target glow, reticle, timeline and all behaviour unchanged.
+window.__applyRelief = function(opts = {}){
+  const O = Object.assign({
+    ground: [0.30, 0.30, 0.31],   // the lit flat surface (mid graphite, like the study's paper grey)
+    relief: 0.85,                 // how far lit/shadow sides depart from the ground tone
+    normalZ: 0.012,               // smaller = steeper relief (the study uses 0.01)
+    ramp: 1.4,                    // height compression: summed mounds above this read as a plateau
+    sizeMul: 3.2,                 // mound diameter relative to the original dot
+    grain: 0.035,
+    light: [-0.62, 0.52, 0.58],
+  }, opts);
+
+  // 1. Height pass: the same points (catalog + projected), drawn as additive soft mounds
+  const hMat = new THREE.ShaderMaterial({
+    uniforms: { sizeMul: { value: O.sizeMul } },
+    vertexShader: `
+      attribute float size; attribute float isDebris; uniform float sizeMul; varying float vDeb;
+      void main(){ vDeb = isDebris; vec4 mv = modelViewMatrix * vec4(position, 1.);
+        gl_PointSize = size * sizeMul * (680. / -mv.z); gl_Position = projectionMatrix * mv; }`,
+    fragmentShader: `
+      varying float vDeb;
+      float bump(vec2 q, float r){ float d = length(q) / r; return d >= 1. ? 0. : pow(1. - d * d, 2.2); }
+      void main(){
+        vec2 u = gl_PointCoord - .5;
+        float h;
+        if (vDeb > .5) {   // debris: three small mounds
+          h = max(bump(u - vec2(0., -.19), .16), max(bump(u - vec2(-.17, .10), .16), bump(u - vec2(.17, .10), .16))) * .7;
+        } else h = bump(u, .5);
+        if (h <= 0.) discard;
+        gl_FragColor = vec4(h, 0., 0., 1.);
+      }`,
+    blending: THREE.AdditiveBlending, depthTest: false, depthWrite: false, transparent: true,
+  });
+  const hScene = new THREE.Scene();
+  const hPoints = new THREE.Points(pGeo, hMat), hProj = new THREE.Points(projGeo, hMat);
+  hPoints.frustumCulled = hProj.frustumCulled = false;
+  hScene.add(hPoints, hProj);
+  // hide the original sprite layers (the relief replaces them)
+  scene.children.filter(c => c.isPoints && c.material === pMat).forEach(c => c.visible = false);
+
+  let hRT = null; const size = new THREE.Vector2();
+  function ensureRT(){
+    renderer.getDrawingBufferSize(size);
+    if (!hRT || hRT.width !== size.x || hRT.height !== size.y) {
+      hRT?.dispose();
+      hRT = new THREE.WebGLRenderTarget(size.x, size.y, { type: THREE.HalfFloatType, format: THREE.RGBAFormat,
+        minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, depthBuffer: false });
+    }
+  }
+
+  // 2. Lighting pass: replaces the (black) background layer
+  fgMat.uniforms.uH = { value: null };
+  fgMat.uniforms.uRes = { value: new THREE.Vector2() };
+  fgMat.uniforms.uGround = { value: new THREE.Vector3(...O.ground) };
+  fgMat.uniforms.uRelief = { value: O.relief };
+  fgMat.uniforms.uNZ = { value: O.normalZ };
+  fgMat.uniforms.uRamp = { value: O.ramp };
+  fgMat.uniforms.uGrain = { value: O.grain };
+  fgMat.uniforms.uL = { value: new THREE.Vector3(...O.light).normalize() };
+  fgMat.fragmentShader = `
+    uniform sampler2D uH; uniform vec2 uRes; uniform vec3 uGround, uL;
+    uniform float uRelief, uNZ, uRamp, uGrain; varying vec2 vUV;
+    float H(vec2 uv){ float h = texture2D(uH, uv).r; return smoothstep(0., uRamp, h); }
+    float hash(vec2 p){ vec3 p3 = fract(vec3(p.xyx) * .1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
+    void main(){
+      vec2 e = 1.5 / uRes;
+      float hx = H(vUV - vec2(e.x, 0.)) - H(vUV + vec2(e.x, 0.));
+      float hy = H(vUV - vec2(0., e.y)) - H(vUV + vec2(0., e.y));
+      vec3 n = normalize(vec3(hx, hy, uNZ));
+      float lit = dot(n, uL) - uL.z;                    // 0 on flat ground, + toward the light, - away
+      vec3 c = uGround + vec3(lit * uRelief * .5);
+      c += (hash(gl_FragCoord.xy) - .5) * uGrain;      // print grain
+      gl_FragColor = vec4(clamp(c, 0., 1.), 1.);
+    }`;
+  fgMat.needsUpdate = true;
+
+  // 3. Fill the height map right before the background layer is drawn each frame
+  const _render = renderer.render.bind(renderer);
+  renderer.render = function(s, c){
+    if (s === fgScene) {
+      ensureRT();
+      hScene.rotation.copy(scene.rotation);
+      hMat.uniforms.sizeMul.value = O.sizeMul;
+      const prevTarget = renderer.getRenderTarget(), prevAuto = renderer.autoClear;
+      renderer.setRenderTarget(hRT); renderer.setClearColor(0x000000, 1); renderer.clear();
+      _render(hScene, camera);
+      renderer.setRenderTarget(prevTarget); renderer.autoClear = prevAuto;
+      fgMat.uniforms.uH.value = hRT.texture;
+      fgMat.uniforms.uRes.value.copy(size);
+    }
+    return _render(s, c);
+  };
+  window.__relief = { O, hMat, fgMat };   // for live tuning
+  return 'relief applied';
+};
+  __applyRelief();
+
+  // ── each mound keeps its own shape ──
+(function(){
+  const R=__relief, m=R.hMat;
+  // overlapping mounds keep the higher surface instead of summing: every object stays its own dome,
+  // neighbours meet in a crease (a union, as in the study) instead of fusing into a plateau
+  m.blending=THREE.CustomBlending; m.blendEquation=THREE.MaxEquation; m.blendSrc=THREE.OneFactor; m.blendDst=THREE.OneFactor;
+  // cap on-screen mound size so close-ups don't balloon; keep a minimum so far objects still register
+  m.uniforms.maxPx={value:22*Math.min(devicePixelRatio,2)}; m.uniforms.minPx={value:3};
+  m.vertexShader=m.vertexShader.replace('uniform float sizeMul;','uniform float sizeMul; uniform float maxPx, minPx;')
+    .replace('gl_PointSize = size * sizeMul * (680. / -mv.z);','gl_PointSize = clamp(size * sizeMul * (680. / -mv.z), minPx, maxPx);');
+  m.needsUpdate=true;
+  R.fgMat.uniforms.uRamp.value=1.0;   // a single mound now reaches full height; nothing to compress
+  return 'mounds now keep their own shape';
+})();
+
+  // ── softer, more transparent falloff ──
+(function(){
+  const R=__relief, f=R.fgMat, m=R.hMat;
+  // softer mound profile: narrower crown, long gentle falloff that reaches the ground with no edge
+  m.fragmentShader=m.fragmentShader.replace('pow(1. - d * d, 2.2)','pow(1. - d * d, 3.2)'); m.needsUpdate=true;
+  // gentler slopes, lighter shadows
+  f.uniforms.uNZ.value=0.034;
+  f.uniforms.uRelief.value=0.55;
+  f.uniforms.uShadow={value:0.5};   // shadows dip half as far below the ground as highlights rise above it
+  f.fragmentShader=f.fragmentShader
+    .replace('uniform float uRelief, uNZ, uRamp, uGrain;','uniform float uRelief, uNZ, uRamp, uGrain, uShadow;')
+    .replace('vec3 c = uGround + vec3(lit * uRelief * .5);','lit = lit < 0. ? lit * uShadow : lit;\n      vec3 c = uGround + vec3(lit * uRelief * .5);');
+  f.needsUpdate=true;
+  return 'softened';
+})();
+
+  // ── pricks of coloured light at each centre ──
+(function(){
+  // colours of the points of light (brighter than the old fills: they read as light, not paint)
+  const C = { gov:[0.52,0.74,1.00], priv:[0.98,0.64,0.30], proj:[1.0,1.0,1.0], debris:[0.5,0.5,0.5] };
+  typeColor = t => t===2 ? C.debris : t===1 ? C.gov : C.priv;
+  objects.forEach(o => o.col = typeColor(o.type));
+  EARLY_SATS.forEach(e => e.col = C.gov);
+  PROJ_OBJS.forEach(o => o.col = C.proj);
+  const _ip = initProjectedSatellites;
+  initProjectedSatellites = function(){ _ip(); PROJ_OBJS.forEach(o => o.col = C.proj); };
+  lastRingCount = -1; rebuildGeometry();
+
+  const oMat = new THREE.ShaderMaterial({
+    uniforms: { dpr: { value: Math.min(devicePixelRatio, 2) } },
+    vertexShader: `
+      attribute vec3 color; attribute float isDebris; uniform float dpr;
+      varying vec3 vC; varying float vDeb;
+      void main(){
+        vC = color; vDeb = isDebris;
+        vec4 mv = modelViewMatrix * vec4(position, 1.);
+        float s = clamp(26. / -mv.z, 2.6, 6.) * dpr;          // a few pixels; a little larger up close
+        gl_PointSize = isDebris > .5 ? s * 2.0 : s;
+        gl_Position = projectionMatrix * mv;
+      }`,
+    fragmentShader: `
+      varying vec3 vC; varying float vDeb;
+      void main(){
+        vec2 u = gl_PointCoord - .5;
+        if (vDeb > .5) {                                       // debris: three tiny black dots
+          float d = min(length(u - vec2(0., -.19)), min(length(u - vec2(-.17, .10)), length(u - vec2(.17, .10))));
+          float a = 1. - smoothstep(.07, .11, d);
+          if (a <= 0.) discard;
+          gl_FragColor = vec4(.02, .02, .025, a * .92); return;
+        }
+        float d = length(u);
+        float core = 1. - smoothstep(0., .22, d), halo = 1. - smoothstep(0., .5, d);
+        float a = clamp(core + halo * .35, 0., 1.);
+        if (a <= .01) discard;
+        gl_FragColor = vec4(vC * (1. + core * .6), a);          // a prick of light with a faint halo
+      }`,
+    transparent: true, depthTest: false, depthWrite: false, blending: THREE.NormalBlending,
+  });
+  const a = new THREE.Points(pGeo, oMat), b = new THREE.Points(projGeo, oMat);
+  a.frustumCulled = b.frustumCulled = false; a.renderOrder = b.renderOrder = 5;
+  scene.add(a, b);
+  window.__pricks = { oMat, a, b, C };
+  return 'points of light added';
+})();
+
+  // ── mood-board colours ──
+(function(){
+  const P=__pricks, C=P.C;
+  C.gov=[0.561,0.690,0.890];    // mood-board blue   #8FB0E3
+  C.priv=[0.761,0.522,0.310];   // mood-board copper #C2854F
+  typeColor = t => t===2 ? C.debris : t===1 ? C.gov : C.priv;
+  objects.forEach(o => o.col = typeColor(o.type));
+  EARLY_SATS.forEach(e => e.col = C.gov);
+  lastRingCount = -1; rebuildGeometry();
+  const m=P.oMat;
+  // blue points: a little larger with a stronger halo, so they hold their own against the grey ground
+  m.vertexShader=m.vertexShader
+    .replace('varying vec3 vC; varying float vDeb;','varying vec3 vC; varying float vDeb; varying float vGov;')
+    .replace('vC = color; vDeb = isDebris;','vC = color; vDeb = isDebris; vGov = step(0.15, color.b - color.r);')
+    .replace('gl_PointSize = isDebris > .5 ? s * 2.0 : s;','gl_PointSize = isDebris > .5 ? s * 2.0 : s * (1. + .4 * vGov);');
+  m.fragmentShader=m.fragmentShader
+    .replace('varying vec3 vC; varying float vDeb;','varying vec3 vC; varying float vDeb; varying float vGov;')
+    .replace('float a = clamp(core + halo * .35, 0., 1.);','float a = clamp(core + halo * mix(.35, .7, vGov), 0., 1.);')
+    .replace('gl_FragColor = vec4(vC * (1. + core * .6), a);','gl_FragColor = vec4(vC * (1. + core * mix(.6, .35, vGov)), a);');
+  m.needsUpdate=true;
+  return 'swatch colours applied';
+})();
+
+  // ── sizes follow the zoom ──
+(function(){
+  const h=__relief.hMat, o=__pricks.oMat, REF=18;          // REF = the overview camera distance
+  h.uniforms.uDist={value:REF}; o.uniforms.uDist={value:REF};
+  h.uniforms.overview={value:1.25};                        // a little fuller in the overview
+  // relief mounds: size set by how far out the camera is, plus a mild near/far cue within the view
+  h.vertexShader=h.vertexShader
+    .replace('uniform float sizeMul; uniform float maxPx, minPx;','uniform float sizeMul; uniform float maxPx, minPx; uniform float uDist, overview;')
+    .replace('gl_PointSize = clamp(size * sizeMul * (680. / -mv.z), minPx, maxPx);',
+             'float zoomF = pow(uDist / 18., 0.45) * overview;            // smaller as the observer moves in\n        float depthF = pow(uDist / max(-mv.z, 0.01), 0.3);        // gentle perspective inside the view\n        gl_PointSize = clamp(size * sizeMul * (680. / 18.) * zoomF * depthF, minPx, maxPx);');
+  h.needsUpdate=true;
+  // points of light: same rule, kept small
+  o.vertexShader=o.vertexShader
+    .replace('uniform float dpr;','uniform float dpr; uniform float uDist;')
+    .replace('float s = clamp(26. / -mv.z, 2.6, 6.) * dpr;','float s = clamp(3.4 * pow(uDist / 18., 0.35) * pow(uDist / max(-mv.z, 0.01), 0.25), 1.8, 5.) * dpr;');
+  o.needsUpdate=true;
+  // feed the camera distance every frame
+  const prev=renderer.render;
+  renderer.render=function(s,c){ const d=camera.position.length(); h.uniforms.uDist.value=d; o.uniforms.uDist.value=d; return prev.call(this,s,c); };
+  return 'sizes now follow the zoom';
+})();
+
+  // ── size balance ──
+(function(){
+  const h=__relief.hMat, o=__pricks.oMat, dpr=Math.min(devicePixelRatio,2);
+  h.vertexShader=h.vertexShader.replace('pow(uDist / 18., 0.45)','pow(uDist / 18., 0.22)');   // gentler shrink when zooming in
+  h.uniforms.minPx.value=7*dpr;            // never smaller than a readable bump
+  h.uniforms.overview.value=1.35;
+  h.needsUpdate=true;
+  o.vertexShader=o.vertexShader.replace('pow(uDist / 18., 0.35)','pow(uDist / 18., 0.2)');
+  o.needsUpdate=true;
+  return 'balanced';
+})();
+
+  // ── overview detail ──
+(function(){
+  const h=__relief.hMat, o=__pricks.oMat, dpr=Math.min(devicePixelRatio,2);
+  h.uniforms.dpr={value:dpr};
+  h.vertexShader=h.vertexShader
+    .replace('uniform float uDist, overview;','uniform float uDist, overview, dpr;')
+    .replace('gl_PointSize = clamp(size * sizeMul * (680. / 18.) * zoomF * depthF, minPx, maxPx);',
+      'float out_ = smoothstep(8., 17., uDist);                     // 1 = overview, 0 = zoomed in\n'+
+      '        float crowded = step(size, 0.09);                           // low-orbit objects and debris (the dense shell)\n'+
+      '        float shrink = mix(1., 0.42, out_ * crowded);               // crowded objects get small when zoomed out\n'+
+      '        float floorPx = mix(minPx, 2.0 * dpr, out_);                 // the minimum size only holds when zoomed in\n'+
+      '        gl_PointSize = clamp(size * sizeMul * (680. / 18.) * zoomF * depthF * shrink, floorPx, maxPx);');
+  h.needsUpdate=true;
+  // points of light: almost no halo in the overview so they can't stack into a blob
+  o.fragmentShader=o.fragmentShader
+    .replace('varying vec3 vC; varying float vDeb; varying float vGov;','varying vec3 vC; varying float vDeb; varying float vGov; varying float vOut;')
+    .replace('float a = clamp(core + halo * mix(.35, .7, vGov), 0., 1.);','float a = clamp(core + halo * mix(.35, .7, vGov) * (1. - .85 * vOut), 0., 1.);');
+  o.vertexShader=o.vertexShader
+    .replace('varying vec3 vC; varying float vDeb; varying float vGov;','varying vec3 vC; varying float vDeb; varying float vGov; varying float vOut;')
+    .replace('vC = color; vDeb = isDebris;','vOut = smoothstep(8., 17., uDist); vC = color; vDeb = isDebris;')
+    .replace(', 1.8, 5.) * dpr;',', 1.8, 5.) * dpr * mix(1., .7, vOut);');
+  o.needsUpdate=true;
+  return 'overview detail fixed';
+})();
+
+  // ── overview haze ──
+(function(){
+  const o=__pricks.oMat;
+  o.fragmentShader=o.fragmentShader.replace('gl_FragColor = vec4(vC * (1. + core * mix(.6, .35, vGov)), a);',
+    'gl_FragColor = vec4(vC * (1. + core * mix(.6, .35, vGov)), a * mix(1., .22, vOut));   // faint in the overview: crowds build a tint, not a solid disc');
+  o.needsUpdate=true;
+  return 'overview haze';
+})();
+
+  // ── debris beneath the colour ──
+(function(){
+  const P=__pricks, o=P.oMat;
+  // debris gets its own layer, drawn beneath the coloured points
+  const d=o.clone();
+  d.uniforms=THREE.UniformsUtils.clone(o.uniforms);
+  d.fragmentShader=o.fragmentShader
+    .replace('if (vDeb > .5) {','if (vDeb < .5) discard;\n        if (vDeb > .5) {')
+    .replace('gl_FragColor = vec4(.02, .02, .025, a * .92); return;','gl_FragColor = vec4(.02, .02, .025, a * .92 * mix(1., .28, vOut)); return;   // faint grain in the overview');
+  d.vertexShader=o.vertexShader.replace('gl_PointSize = isDebris > .5 ? s * 2.0','gl_PointSize = isDebris > .5 ? s * mix(2.0, 1.5, vOut)');
+  // the coloured layer no longer draws debris, and holds a little more presence in the overview
+  o.fragmentShader=o.fragmentShader
+    .replace('if (vDeb > .5) {','if (vDeb > .5) discard;\n        if (false) {')
+    .replace('a * mix(1., .22, vOut)','a * mix(1., .38, vOut)');
+  o.needsUpdate=true; d.needsUpdate=true;
+  const da=new THREE.Points(pGeo,d), db=new THREE.Points(projGeo,d);
+  da.frustumCulled=db.frustumCulled=false; da.renderOrder=db.renderOrder=4;
+  P.a.renderOrder=P.b.renderOrder=6;
+  scene.add(da,db);
+  // keep both layers fed with the camera distance
+  const prev=renderer.render; renderer.render=function(s,c){ d.uniforms.uDist.value=o.uniforms.uDist.value; return prev.call(this,s,c); };
+  P.dMat=d;
+  return 'debris layered beneath colour';
+})();
+
+  // ── brighter category colours ──
+(function(){
+  const P=__pricks, C=P.C, o=P.oMat;
+  C.gov=[0.40,0.64,1.00];    // swatch blue, more saturated so it never reads as white
+  C.priv=[0.96,0.58,0.26];   // brighter copper
+  C.proj=[1.0,1.0,1.0];      // white
+  typeColor = t => t===2 ? C.debris : t===1 ? C.gov : C.priv;
+  objects.forEach(x => x.col = typeColor(x.type));
+  EARLY_SATS.forEach(e => e.col = C.gov);
+  PROJ_OBJS.forEach(x => x.col = C.proj);
+  lastRingCount = -1; rebuildGeometry();
+  o.fragmentShader=o.fragmentShader
+    .replace('a * mix(1., .38, vOut)','a * mix(1., .78, vOut)')                                   // hold strength in the overview
+    .replace('halo * mix(.35, .7, vGov) * (1. - .85 * vOut)','halo * mix(.5, .8, vGov) * (1. - .55 * vOut)')
+    .replace('vC * (1. + core * mix(.6, .35, vGov))','vC * (1.15 + core * mix(.7, .45, vGov))');
+  o.vertexShader=o.vertexShader.replace('dpr * mix(1., .7, vOut)','dpr * mix(1.1, .9, vOut)');
+  o.needsUpdate=true;
+  return 'brighter';
+})();
+
+  // ── new-object notice inside the info tray ──
+(function(){
+  const panel=document.getElementById('data-panel');
+  const banner=document.getElementById('new-obj-banner'); banner.style.display='none';   // no more floating banner
+  const st=document.createElement('style');
+  st.textContent='#data-panel .cp-notice{margin-top:14px;padding-top:10px;border-top:1px solid rgba(255,255,255,0.07);font-size:7.5px;letter-spacing:.25em;text-transform:uppercase;'+
+    'background:linear-gradient(110deg,#6e4421 0%,#b98146 18%,#f6dcae 34%,#c48d53 48%,#ecc792 64%,#8f5d2f 82%,#d9a96f 100%);background-size:200% 100%;'+
+    '-webkit-background-clip:text;background-clip:text;color:transparent;animation:bzSheen 7s linear infinite}';
+  document.head.appendChild(st);
+  window.__lastNotice=null;
+  function fit(){ panel.style.zoom=1; let z=1; while(panel.scrollHeight>panel.clientHeight+1 && z>0.6){ z-=0.04; panel.style.zoom=z; } }
+  function appendNotice(){
+    panel.querySelector('.cp-notice')?.remove();
+    if(!__lastNotice) return;
+    const d=document.createElement('div'); d.className='cp-notice';
+    const t=new Date(__lastNotice.at).toISOString().slice(11,16);
+    d.textContent='⬤ '+__lastNotice.count+' NEW OBJECT'+(__lastNotice.count>1?'S':'')+' DETECTED · '+t+' UTC';
+    panel.appendChild(d); fit();
+  }
+  flashNewObject = function(count){ __lastNotice={count, at:Date.now()}; appendNotice(); };
+  const _b=buildDataPanel, _p=buildProjectedDataPanel;
+  buildDataPanel=o=>{ _b(o); appendNotice(); };
+  buildProjectedDataPanel=o=>{ _p(o); appendNotice(); };
+  return 'notice moved into the info tray';
+})();
+
+  // ── no crosshair text; TODAY in the bar ──
+(function(){
+  const st=document.createElement('style');
+  st.textContent=
+    '#reticle-label,#reticle-norad{display:none!important}'+                       // no text on the crosshairs
+    '#tl-today-label{top:12px!important}';                                        // TODAY sits inside the bar, under its marker
+  document.head.appendChild(st);
+  return 'crosshair text removed, TODAY moved into the bar';
+})();
+
+  // ── TODAY marker ──
+(function(){
+  const st=document.createElement('style');
+  // marker spans only the track area; the label sits below it with a gap
+  st.textContent='#tl-today{top:-7px!important;height:13px!important} #tl-today-label{top:11px!important}';
+  document.head.appendChild(st); return 'today marker shortened';
+})();
+
+  // ── TODAY spacing ──
+(function(){
+  const st=document.createElement('style');
+  st.textContent='#tl-today{top:-6px!important;height:9px!important} #tl-today-label{top:12px!important}';
+  document.head.appendChild(st); return 'gap widened';
+})();
+
+  // ── info tray fits without scrolling ──
+(function(){
+    const panel=document.getElementById('data-panel');
+    const fit=()=>{ panel.style.zoom=1; let z=1; while(panel.scrollHeight>panel.clientHeight+1 && z>0.6){ z-=0.04; panel.style.zoom=z; } };
+    const _b=buildDataPanel, _p=buildProjectedDataPanel;
+    buildDataPanel=o=>{ _b(o); fit(); };
+    buildProjectedDataPanel=o=>{ _p(o); fit(); };
+    addEventListener('resize', fit);
+    const st=document.createElement('style'); st.textContent='#data-panel{overflow:hidden!important} #data-panel .cp-v{word-break:normal;overflow-wrap:break-word}'; document.head.appendChild(st);
+    fit(); return 'info box fits';
+  })();
+
+  // ── scales to any screen size (large displays) ──
+(function(){
+  // Reference = the laptop composition (CSS height ~711, drawing buffer ~1422). Every size scales from it.
+  const REF_CSS_H = 711, REF_BUF_H = 1422;
+  const st=document.createElement('style');
+  st.textContent=
+    '#timeline,#binary,#info-toggle,#state-label{zoom:var(--k)}'+
+    '#reticle{transform:scale(var(--k));transform-origin:50% 50%}'+
+    '#data-panel{width:calc(min(26vw, 360px * var(--k)))!important;padding:calc(28px * var(--k)) calc(24px * var(--k))!important}'+
+    '#data-panel > *{zoom:var(--k)}';
+  document.head.appendChild(st);
+  const h=__relief.hMat, o=__pricks.oMat, d=__pricks.dMat;
+  h.uniforms.uScale={value:1};
+  h.vertexShader=h.vertexShader.replace('uniform float uDist, overview, dpr;','uniform float uDist, overview, dpr, uScale;')
+    .replace('* shrink, floorPx, maxPx);','* shrink, floorPx, maxPx) * uScale;');
+  h.needsUpdate=true;
+  const buf=new THREE.Vector2();
+  function update(){
+    const kUi = innerHeight / REF_CSS_H;
+    renderer.getDrawingBufferSize(buf);
+    const kPx = buf.y / REF_BUF_H;
+    document.documentElement.style.setProperty('--k', kUi.toFixed(3));
+    h.uniforms.uScale.value = kPx;
+    o.uniforms.dpr.value = 2 * kPx; d.uniforms.dpr.value = 2 * kPx;    // the points were tuned at a pixel ratio of 2
+  }
+  addEventListener('resize', ()=>setTimeout(update, 50));
+  update();
+  window.__responsive = update;
+  return 'resolution-independent';
+})();
+}
+(function waitForSky(){
+  if (typeof objects !== 'undefined' && objects.length > 0 && typeof renderer !== 'undefined') {
+    try { applyExhibitionLook(); console.log('[Crowded Sky] exhibition look applied'); }
+    catch(e){ console.error('[Crowded Sky] look failed', e); }
+  } else setTimeout(waitForSky, 200);
+})();
+</script>
 </body>
 </html>
