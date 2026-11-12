@@ -1,0 +1,2096 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Crowded Sky — Gallery Display v5</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;background:#000;overflow:hidden}
+canvas{display:block;position:fixed;top:0;left:0;width:100%;height:100%}
+
+/* ── Scanline overlay ─────────────────────────────────────── */
+#scanlines{
+  position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:2;
+  background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,0.04) 2px,rgba(0,0,0,0.04) 4px);
+}
+
+/* ── Binary scroll (right edge) ────────────────────────────── */
+#binary{
+  position:fixed;top:0;left:0;width:110px;height:100vh;overflow:hidden;
+  pointer-events:none;z-index:3;
+}
+#binary-label{display:none}
+#binary-inner{
+  font-family:'Courier New',monospace;font-size:6.5px;line-height:1.7;
+  letter-spacing:0.06em;color:rgba(255,255,255,0.20);white-space:pre;
+  animation:scrollUp 90s linear infinite;
+}
+@keyframes scrollUp{0%{transform:translateY(0)}100%{transform:translateY(-50%)}}
+
+/* ── UTC clock + count ─────────────────────────────────────── */
+#hud-top{display:none}
+#clock{display:none}
+#obj-count{display:none}
+#title-block{display:none}
+
+/* ── NEW OBJECT banner (appears briefly when live data arrives) */
+#new-obj-banner{
+  position:fixed;bottom:124px;right:20px;   /* bottom-right corner, above the info button and timeline */
+  font-family:'Courier New',monospace;font-size:9px;letter-spacing:0.35em;
+  text-transform:uppercase;color:rgba(255,80,0,0.85);
+  border:1px solid rgba(255,80,0,0.3);padding:10px 22px;
+  pointer-events:none;z-index:20;opacity:0;transition:opacity 0.3s;
+}
+
+/* ── Targeting Reticle ──────────────────────────────────────── */
+#reticle{
+  position:fixed;pointer-events:none;z-index:15;
+  opacity:0;transition:opacity 0.25s;
+}
+.corner{position:absolute;width:14px;height:14px;border-color:#ff1800;border-style:solid}
+.tl{top:0;left:0;border-width:2px 0 0 2px}
+.tr{top:0;right:0;border-width:2px 2px 0 0}
+.bl{bottom:0;left:0;border-width:0 0 2px 2px}
+.br{bottom:0;right:0;border-width:0 2px 2px 0}
+#reticle-label{
+  position:absolute;top:-18px;left:0;
+  font-family:'Courier New',monospace;font-size:7px;letter-spacing:0.25em;
+  text-transform:uppercase;color:#ff1800;white-space:nowrap;opacity:0.7;
+}
+#reticle-norad{
+  position:absolute;bottom:-16px;right:0;
+  font-family:'Courier New',monospace;font-size:7px;letter-spacing:0.18em;
+  color:rgba(255,24,0,0.5);white-space:nowrap;
+}
+/* pulsing crosshair lines */
+#reticle-dot{
+  position:absolute;top:50%;left:50%;
+  width:6px;height:6px;
+  margin:-3px 0 0 -3px;
+  border-radius:50%;
+  background:#fff;
+  box-shadow:0 0 6px 2px rgba(255,220,140,0.9), 0 0 14px 5px rgba(255,180,80,0.5);
+  animation:dotPulse 1.6s ease-in-out infinite;
+}
+@keyframes dotPulse{
+  0%,100%{opacity:0.7;transform:scale(0.85)}
+  50%{opacity:1;transform:scale(1.15)}
+}
+#reticle-h,#reticle-v{
+  position:absolute;background:rgba(255,24,0,0.18);
+  animation:retPulse 1.4s ease-in-out infinite;
+}
+#reticle-h{left:14px;right:14px;top:50%;height:1px;margin-top:-0.5px}
+#reticle-v{top:14px;bottom:14px;left:50%;width:1px;margin-left:-0.5px}
+@keyframes retPulse{0%,100%{opacity:0.15}50%{opacity:0.55}}
+
+/* ── Data panel ────────────────────────────────────────────── */
+#data-panel{
+  position:fixed;right:0;top:0;bottom:0;
+  width:var(--panel-w);font-family:'Courier New',monospace;
+  pointer-events:none;z-index:15;opacity:0;transition:opacity 0.7s;
+  background:rgba(0,0,0,0.88);
+  border-left:1px solid rgba(255,24,0,0.25);
+  padding:40px 28px 28px;
+  display:flex;flex-direction:column;justify-content:center;
+  backdrop-filter:blur(3px);
+}
+#dp-designate{
+  font-size:8px;letter-spacing:0.32em;text-transform:uppercase;
+  color:rgba(255,24,0,0.9);margin-bottom:14px;
+  border-bottom:1px solid rgba(255,24,0,0.3);
+  padding-bottom:8px;
+}
+#dp-name{
+  font-size:13px;letter-spacing:0.10em;text-transform:uppercase;
+  color:rgba(255,255,255,0.96);margin-bottom:5px;line-height:1.4;
+}
+#dp-norad{
+  font-size:8px;letter-spacing:0.28em;color:rgba(255,255,255,0.45);
+  margin-bottom:18px;
+}
+#dp-fields{
+  font-size:8px;letter-spacing:0.10em;
+  color:rgba(255,255,255,0.7);border-top:1px solid rgba(255,255,255,0.08);
+  padding-top:14px;margin-bottom:16px;
+}
+#dp-fields>div{
+  display:flex;flex-direction:column;gap:2px;margin-bottom:10px;
+}
+#dp-fields .lbl{color:rgba(255,255,255,0.38);letter-spacing:0.14em;}
+#dp-fields .val{color:rgba(255,255,255,0.90);line-height:1.5;}
+#dp-tle{
+  font-size:7px;letter-spacing:0.08em;line-height:2.0;
+  color:rgba(255,255,255,0.35);border-top:1px solid rgba(255,255,255,0.07);
+  padding-top:12px;margin-bottom:14px;word-break:break-all;
+}
+#dp-binary{
+  font-size:7px;letter-spacing:0.08em;line-height:1.6;
+  color:rgba(255,24,0,0.45);border-top:1px solid rgba(255,24,0,0.12);
+  padding-top:10px;overflow:hidden;height:40px;
+}
+#dp-purpose{
+  font-size:7.5px;letter-spacing:0.12em;
+  color:rgba(255,255,255,0.52);margin-top:12px;line-height:2.0;
+  text-align:left;
+}
+
+/* ── Info mode toggle (bottom-left corner) ─────────────────── */
+#info-toggle{
+  position:fixed;bottom:72px;right:20px;
+  width:40px;height:40px;
+  border:1px solid rgba(255,255,255,0.15);
+  border-radius:4px;
+  display:flex;align-items:center;justify-content:center;
+  cursor:pointer;z-index:30;pointer-events:auto;
+  opacity:0.35;transition:opacity 0.3s, border-color 0.3s, background 0.3s;
+  background:rgba(0,0,0,0.4);
+}
+#info-toggle svg{
+  width:16px;height:16px;
+  stroke:rgba(255,255,255,0.5);stroke-width:1.5;
+  fill:none;transition:stroke 0.3s;
+}
+#info-toggle:hover{
+  opacity:1;
+  border-color:rgba(255,255,255,0.3);
+  background:rgba(0,0,0,0.7);
+}
+#info-toggle:hover svg{ stroke:rgba(255,255,255,0.9); }
+#info-toggle.active{
+  opacity:1;
+  border-color:rgba(255,24,0,0.6);
+  background:rgba(0,0,0,0.7);
+}
+#info-toggle.active svg{ stroke:rgba(255,24,0,1.0); }
+/* Brighten toggle when mouse is near bottom-right */
+body.corner-hover #info-toggle{ opacity:1; }
+
+/* ── State label (LOCK / TRANSMITTING / etc.) ─────────────── */
+/* ── Timeline ───────────────────────────────────────── */
+:root{--panel-w:clamp(260px,22vw,360px)}
+#timeline{
+  position:fixed;bottom:0;left:0;right:0;height:52px;
+  background:rgba(0,0,0,0.72);border-top:1px solid rgba(255,255,255,0.07);
+  z-index:20;pointer-events:auto;cursor:crosshair;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+}
+#tl-track{
+  position:absolute;left:60px;right:60px;top:18px;height:2px;
+  background:rgba(255,255,255,0.12);
+}
+#tl-cursor{
+  position:absolute;top:-5px;width:2px;height:12px;
+  background:#fff;box-shadow:0 0 6px rgba(255,255,255,0.8);
+  transform:translateX(-50%);transition:left 0.1s linear;
+}
+#tl-today{
+  position:absolute;top:-8px;width:1px;height:18px;
+  background:rgba(255,100,50,0.7);transform:translateX(-50%);
+}
+#tl-today-label{
+  position:absolute;top:-22px;font-family:"Courier New",monospace;
+  font-size:7px;letter-spacing:0.15em;color:rgba(255,100,50,0.8);
+  transform:translateX(-50%);white-space:nowrap;
+}
+.tl-end{
+  position:absolute;top:8px;font-family:"Courier New",monospace;
+  font-size:8px;letter-spacing:0.2em;color:rgba(255,255,255,0.3);
+}
+.tl-end.left{left:8px}.tl-end.right{right:8px;text-align:right}
+#tl-date{
+  position:absolute;bottom:6px;left:50%;transform:translateX(-50%);
+  font-family:"Courier New",monospace;font-size:9px;letter-spacing:0.28em;
+  color:rgba(255,255,255,0.6);white-space:nowrap;
+}
+#tl-era{
+  position:absolute;bottom:6px;right:12px;
+  font-family:"Courier New",monospace;font-size:8px;letter-spacing:0.15em;
+  color:rgba(255,100,50,0.4);
+}
+#tl-obj-count{
+  position:absolute;bottom:6px;left:12px;
+  font-family:"Courier New",monospace;font-size:8px;letter-spacing:0.18em;
+  color:rgba(255,255,255,0.28);
+}
+#loading-msg{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);font-family:"Courier New",monospace;font-size:10px;letter-spacing:0.35em;color:rgba(255,255,255,0.55);pointer-events:none;z-index:30;text-transform:uppercase;text-align:center;line-height:2.2;}
+#state-label{
+  position:fixed;bottom:28px;right:44px;
+  font-family:'Courier New',monospace;font-size:7px;letter-spacing:0.35em;
+  text-transform:uppercase;color:rgba(255,24,0,0.25);pointer-events:none;z-index:10;
+}
+</style>
+</head>
+<body>
+
+<div id="scanlines"></div>
+
+<div id="binary"><div id="binary-inner"></div></div>
+
+<div id="hud-top" style="display:none"></div>
+<div id="obj-count" style="display:none"></div>
+<div id="clock" style="display:none"></div>
+<div id="loading-msg">ACQUIRING ORBITAL DATA ···</div>
+<div id="timeline">
+  <div class="tl-end left">1957</div>
+  <div class="tl-end right">2036</div>
+  <div id="tl-track">
+    <div id="tl-today"><div id="tl-today-label">TODAY</div></div>
+    <div id="tl-cursor"></div>
+  </div>
+  <div id="tl-date">1957 OCT 04</div>
+  <div id="tl-era">HISTORICAL</div>
+  <div id="tl-obj-count"></div>
+</div>
+<div id="title-block" style="display:none"></div>
+
+<div id="new-obj-banner">⬤ NEW OBJECT DETECTED</div>
+
+<div id="reticle">
+  <div class="corner tl"></div>
+  <div class="corner tr"></div>
+  <div class="corner bl"></div>
+  <div class="corner br"></div>
+  <div id="reticle-dot"></div>
+  <div id="reticle-h"></div>
+  <div id="reticle-v"></div>
+  <div id="reticle-label">OBJECT DESIGNATED</div>
+  <div id="reticle-norad"></div>
+</div>
+
+<div id="data-panel">
+  <div id="dp-designate">OBJECT DESIGNATED ─────────────────</div>
+  <div id="dp-name"></div>
+  <div id="dp-norad"></div>
+  <div id="dp-fields"></div>
+  <div id="dp-tle"></div>
+  <div id="dp-binary"></div>
+  <div id="dp-warning" style="display:none;color:#ff4422;font-size:9px;letter-spacing:0.18em;margin:6px 0 2px;padding:4px 0;border-top:1px solid rgba(255,68,34,0.3);border-bottom:1px solid rgba(255,68,34,0.3);"></div>
+  <div id="dp-purpose"></div>
+</div>
+
+<div id="state-label"></div>
+
+<!-- Info mode toggle -->
+<div id="info-toggle" title="Toggle info panel">
+  <svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
+    <rect x="2" y="2" width="12" height="12" rx="1"/>
+    <line x1="8" y1="5" x2="8" y2="8"/>
+    <circle cx="8" cy="11" r="0.5" fill="currentColor" stroke="none"/>
+  </svg>
+</div>
+
+<script src="/three.r134.min.js"></script>
+<script>
+'use strict';
+
+// ── Cloudflare Worker relay (companion app sync) ──────────────────────────
+// Only the gallery machine sends targets to the companion feed. The write key is
+// never in this file: open the page once on the gallery machine as
+//     autonomous-v5.html#gallery=<WRITE KEY>
+// The key is kept in that browser's localStorage and removed from the address bar.
+// #gallery=off forgets it. Every other browser that opens this page only watches.
+const WORKER_URL = 'https://crowded-sky.ashleyzelinskie-website.workers.dev';
+const GALLERY_KEY_STORE = 'crowded-sky-gallery-key';
+let WORKER_KEY = null;
+function initGalleryKey(){
+  const m = location.hash.match(/^#gallery=([A-Za-z0-9_-]{8,128}|off)$/);
+  try{
+    if(m && m[1]==='off') localStorage.removeItem(GALLERY_KEY_STORE);
+    else if(m) localStorage.setItem(GALLERY_KEY_STORE, m[1]);
+    WORKER_KEY = localStorage.getItem(GALLERY_KEY_STORE);
+  }catch(e){ if(m) WORKER_KEY = m[1]!=='off' ? m[1] : null; }
+  if(m) history.replaceState(null, '', location.pathname + location.search);
+  console.log('[Crowded Sky] Gallery mode ' + (WORKER_KEY ? 'ON: sending targets to the companion feed' : 'off'));
+}
+initGalleryKey();
+window.addEventListener('hashchange', initGalleryKey);  // typing #gallery=… on an open page works too
+
+async function postTarget(body){
+  if(!WORKER_KEY) return;  // not the gallery machine
+  try{
+    await fetch(`${WORKER_URL}/target`,{method:'POST',
+      headers:{'Content-Type':'application/json','X-Write-Key':WORKER_KEY},
+      body:JSON.stringify(body)});
+  }catch(e){ console.warn('[Crowded Sky] Companion feed write failed:',e.message); }
+}
+
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let currentProjectedData = null;
+
+async function writeTargetToWorker(obj){
+  if(!obj || !WORKER_KEY) return;
+  if(obj.isProjected){
+    const pd = Object.assign({}, currentProjectedData || generateProjectedData(obj));
+    delete pd._num;
+    await postTarget(pd);
+    return;
+  }
+  const meta = getMeta(obj.norad);
+  const inferred = inferFields(obj);
+  const period = obj.mm ? (1440/obj.mm).toFixed(1) : null;
+  const incDeg = obj.inc ? (obj.inc*180/Math.PI).toFixed(2) : null;
+  const body = {
+    norad: obj.norad || null,
+    name: obj.name || null,
+    type: obj.type,
+    alt: obj.alt ? Math.round(obj.alt) : null,
+    period: period,
+    inc: incDeg,
+    ecc: obj.ecc ? obj.ecc.toFixed(6) : null,
+    country: meta?.country || inferred.country || null,
+    launched: meta?.launched || inferred.launched || null,
+    purpose: meta?.purpose || inferPurpose(obj.name) || null,
+    note:     meta?.note || null,
+    sim_year: new Date(simTime).getUTCFullYear(),
+    raan:     obj.raan ? (obj.raan*180/Math.PI).toFixed(2) : null,
+    mm:       obj.mm   ? obj.mm.toFixed(8) : null,
+    m0:       obj.M0   ? (obj.M0*180/Math.PI).toFixed(4) : null,
+    epoch:    obj.epoch_ms ? new Date(obj.epoch_ms).toISOString().slice(0,19).replace('T',' ')+' UTC' : null,
+    classification: obj.type===0?'COMMERCIAL / PRIVATE':obj.type===1?'GOVERNMENT / MILITARY':'DEBRIS / NON-OPERATIONAL',
+    warning:  obj.type===2 ? 'TRACKABLE DEBRIS — UNCONTROLLED OBJECT'
+              : (obj.alt && obj.alt<600 && obj.type!==2) ? 'LOW ORBIT — ELEVATED COLLISION RISK ZONE'
+              : null,
+    projected: false,
+  };
+  await postTarget(body);
+}
+
+// ── Info mode (data panel on/off) ─────────────────────────────────────────────
+let infoMode = false;
+const infoToggle = document.getElementById('info-toggle');
+infoToggle.addEventListener('click', ()=>{
+  infoMode = !infoMode;
+  infoToggle.classList.toggle('active', infoMode);
+  if(!infoMode){
+    // Hide panel immediately if we're turning off
+    document.getElementById('data-panel').style.opacity = '0';
+  } else if(state === S.INSPECT || state === S.ZOOM_IN){
+    // Already in inspect — show it now
+    document.getElementById('data-panel').style.opacity = '1';
+  }
+});
+
+// Reveal toggle when cursor is near bottom-right
+document.addEventListener('mousemove', e=>{
+  const nearCorner = e.clientX > window.innerWidth - 80 && e.clientY > window.innerHeight - 80;
+  document.body.classList.toggle('corner-hover', nearCorner);
+});
+
+// ── Constants ─────────────────────────────────────────────────────────────────
+const MAX = 35000, RING_PTS = 24, AUTO_SPEED = 0.00010; // 35k covers full Space-Track catalog; RING_PTS reduced to keep GPU buffer manageable
+
+// ── State machine ─────────────────────────────────────────────────────────────
+const S = { ORBIT:0, LOCK:1, ZOOM_IN:2, INSPECT:3, ZOOM_OUT:4, DATE_SLIDE:5 };
+let state = S.ORBIT;
+let stateMs = 0;
+let frozenRotY = 0;
+let currentTarget = null;
+const recentSet = new Set();
+
+// ── Timelapse simulation clock ────────────────────────────────────────────────
+const SIM_START_MS = new Date('1957-10-04').getTime(); // Sputnik 1 launch
+let   SIM_END_MS   = Date.now() + 10*365.25*86400*1000; // now + 10 years (moved forward daily)
+document.querySelector('.tl-end.right').textContent = new Date(SIM_END_MS).getUTCFullYear(); // was hard-coded 2036
+const STARLINK_ERA_MS = new Date('2019-05-24').getTime(); // first Starlink launch
+let   simTime      = new Date('2026-01-01').getTime(); // start near present
+let   frameTick    = 0; // throttle propagation
+
+// DATE_SLIDE state vars
+let slideFromMs = simTime;
+let slideToMs   = simTime;
+const SLIDE_DUR = 3200; // ms of real time for date slide animation
+
+// Interesting date milestones to visit (with weights)
+const DATE_MILESTONES = [
+  // Historical (sparse — visited rarely)
+  {ms: new Date('1957-10-04').getTime(), w:0.3, label:'SPUTNIK ERA'},
+  {ms: new Date('1962-07-10').getTime(), w:0, label:'EARLY SPACE AGE'},
+  {ms: new Date('1969-07-20').getTime(), w:0, label:'APOLLO ERA'},
+  {ms: new Date('1981-04-12').getTime(), w:0, label:'SHUTTLE ERA'},
+  {ms: new Date('1993-01-01').getTime(), w:0.2, label:'POST COLD WAR'},
+  {ms: new Date('1998-11-20').getTime(), w:0.5, label:'ISS CONSTRUCTION'},
+  {ms: new Date('2007-01-11').getTime(), w:2, label:'FENGYUN BREAKUP'},
+  {ms: new Date('2009-02-10').getTime(), w:2, label:'IRIDIUM COLLISION'},
+  {ms: new Date('2014-01-01').getTime(), w:3, label:'PRE-MEGACONSTELLATION'},
+  // Modern & future (dense — visited frequently)
+  {ms: new Date('2019-05-24').getTime(), w:6, label:'STARLINK LAUNCH'},
+  {ms: new Date('2021-01-01').getTime(), w:6, label:'CONSTELLATION GROWTH'},
+  {ms: new Date('2023-06-01').getTime(), w:6, label:'ORBITAL CROWDING'},
+  {ms: Date.now(),                       w:8, label:'PRESENT',     yearsAhead:0},
+  {ms: Date.now()+2*365.25*86400000,    w:5, label:'NEAR FUTURE', yearsAhead:2},
+  {ms: Date.now()+5*365.25*86400000,    w:4, label:'MID FUTURE',  yearsAhead:5},
+  {ms: Date.now()+10*365.25*86400000,   w:3, label:'FAR FUTURE',  yearsAhead:10},
+];
+let currentEraLabel = 'PRESENT';
+
+function countObjectsAtTime(t){
+  return objects.filter(o=>(o.launchMs||estimateLaunchMs(o.norad))<=t).length;
+}
+
+function chooseNextDate(){
+  // Try up to 8 times; reject dates with fewer than 10 real catalog objects
+  for(let attempt=0; attempt<8; attempt++){
+    const totalW = DATE_MILESTONES.reduce((s,m)=>s+m.w,0);
+    let r = Math.random()*totalW;
+    let chosen = DATE_MILESTONES[DATE_MILESTONES.length-1];
+    for(const m of DATE_MILESTONES){ r-=m.w; if(r<=0){chosen=m;break;} }
+    const spread = (Math.random()-0.5)*180*86400000;
+    const target = Math.max(SIM_START_MS, Math.min(SIM_END_MS, chosen.ms+spread));
+    // Require at least 10 real objects at this date
+    if(countObjectsAtTime(target)>=10){
+      currentEraLabel = chosen.label;
+      return target;
+    }
+  }
+  // Fallback: always works — pick a random date in the well-populated era
+  currentEraLabel = 'PRESENT';
+  return Date.now() - Math.random()*3*365.25*86400000; // random within last 3 years
+}
+
+function easeInOut(t){ return t<0.5?2*t*t:1-Math.pow(-2*t+2,2)/2; }
+
+// Non-linear timeline: t in [0,1] → simTime
+// Gives 30% of screen time to 1957-2019 (62yrs), 70% to 2019-2036 (17yrs)
+const TL_DURATION_MS = 75000; // 75 real seconds per full loop
+function tlFracToSimTime(frac){
+  if(frac<0.30){
+    // 0-0.30 maps to 1957-2019
+    return SIM_START_MS + (frac/0.30)*(STARLINK_ERA_MS-SIM_START_MS);
+  } else {
+    // 0.30-1.0 maps to 2019-2036
+    return STARLINK_ERA_MS + ((frac-0.30)/0.70)*(SIM_END_MS-STARLINK_ERA_MS);
+  }
+}
+function simTimeToTlFrac(t){
+  if(t<STARLINK_ERA_MS){
+    return 0.30*(t-SIM_START_MS)/(STARLINK_ERA_MS-SIM_START_MS);
+  } else {
+    return 0.30 + 0.70*(t-STARLINK_ERA_MS)/(SIM_END_MS-STARLINK_ERA_MS);
+  }
+}
+let tlFrac = 0; // [0,1] current position on timeline
+
+// NORAD to estimated launch year — finer-grained for the 1990-2026 era
+// (Historical catalog starts ~NORAD 19548 = 1989)
+function estimateLaunchMs(norad){
+  if(!norad)        return new Date('2025-01-01').getTime();
+  // Historical milestones (hand-tuned from catalog data)
+  if(norad<19600)   return new Date('1989-01-01').getTime();
+  if(norad<20000)   return new Date('1989-06-01').getTime();
+  if(norad<20500)   return new Date('1990-01-01').getTime();
+  if(norad<21000)   return new Date('1990-08-01').getTime();
+  if(norad<22000)   return new Date('1991-06-01').getTime();
+  if(norad<23000)   return new Date('1993-01-01').getTime();
+  if(norad<24000)   return new Date('1994-06-01').getTime();
+  if(norad<25000)   return new Date('1996-01-01').getTime();
+  if(norad<26000)   return new Date('1997-06-01').getTime();
+  if(norad<27000)   return new Date('1999-01-01').getTime();
+  if(norad<28000)   return new Date('2000-06-01').getTime();
+  if(norad<29000)   return new Date('2002-01-01').getTime();
+  if(norad<30000)   return new Date('2003-06-01').getTime();
+  if(norad<31000)   return new Date('2005-01-01').getTime();
+  if(norad<32000)   return new Date('2006-01-01').getTime();
+  if(norad<33000)   return new Date('2007-06-01').getTime();
+  if(norad<34000)   return new Date('2008-06-01').getTime();
+  if(norad<35000)   return new Date('2009-06-01').getTime();
+  if(norad<36000)   return new Date('2010-06-01').getTime();
+  if(norad<37000)   return new Date('2011-06-01').getTime();
+  if(norad<38000)   return new Date('2012-06-01').getTime();
+  if(norad<39000)   return new Date('2013-06-01').getTime();
+  if(norad<40000)   return new Date('2014-06-01').getTime();
+  if(norad<41000)   return new Date('2015-06-01').getTime();
+  if(norad<42000)   return new Date('2016-06-01').getTime();
+  if(norad<43000)   return new Date('2017-06-01').getTime();
+  if(norad<44000)   return new Date('2018-06-01').getTime();
+  if(norad<44500)   return new Date('2019-06-01').getTime(); // early Starlink
+  if(norad<46000)   return new Date('2020-01-01').getTime();
+  if(norad<48000)   return new Date('2020-08-01').getTime();
+  if(norad<50000)   return new Date('2021-06-01').getTime();
+  if(norad<52000)   return new Date('2022-01-01').getTime();
+  if(norad<54000)   return new Date('2022-06-01').getTime();
+  if(norad<56000)   return new Date('2023-01-01').getTime();
+  if(norad<58000)   return new Date('2023-08-01').getTime();
+  if(norad<60000)   return new Date('2024-03-01').getTime();
+  if(norad<65000)   return new Date('2024-08-01').getTime();
+  if(norad<75000)   return new Date('2025-01-01').getTime();
+  if(norad<90000)   return new Date('2025-06-01').getTime();
+  return new Date('2026-01-01').getTime();
+}
+
+// Synthetic early satellites (pre-catalog era objects placed at real orbital params)
+const EARLY_SATS = [
+  // Sputnik 1: launched 1957-10-04, decayed 1958-01-04; 65° incl, 229km x 941km
+  {name:'SPUTNIK 1',norad:1,launchMs:new Date('1957-10-04').getTime(),endMs:new Date('1958-01-04').getTime(),pos:[1.2255,0.1501,0.1876],col:[1,0.9,0.5],type:1,alt:585},
+  {name:'SPUTNIK 2',norad:2,launchMs:new Date('1957-11-03').getTime(),endMs:new Date('1958-04-14').getTime(),pos:[-1.0945,0.2535,-0.2304],col:[1,0.9,0.5],type:1,alt:936},
+  {name:'EXPLORER 1',norad:4,launchMs:new Date('1958-02-01').getTime(),endMs:new Date('1970-03-31').getTime(),pos:[0.9563,-0.1839,0.7478],col:[0.7,0.9,1],type:1,alt:1452},
+  {name:'VANGUARD 1',norad:5,launchMs:new Date('1958-03-17').getTime(),endMs:new Date('2200-01-01').getTime(),pos:[-0.8723,0.5368,0.8723],col:[0.7,0.9,1],type:1,alt:2200},
+  {name:'TIROS 1',norad:50,launchMs:new Date('1960-04-01').getTime(),endMs:new Date('1961-01-01').getTime(),pos:[1.0529,-0.0554,0.3436],col:[0.4,0.8,1],type:1,alt:694},
+  {name:'TELSTAR 1',norad:340,launchMs:new Date('1962-07-10').getTime(),endMs:new Date('1963-02-21').getTime(),pos:[0.9106,0.8347,-0.8802],col:[1,0.7,0.3],type:1,alt:3292},
+  {name:'MOLNIYA 1-01',norad:1454,launchMs:new Date('1965-04-23').getTime(),endMs:new Date('1970-01-01').getTime(),pos:[-1.6344,3.5956,1.0623],col:[1,0.5,0.5],type:1,alt:19678},
+  {name:'INTELSAT I',norad:1378,launchMs:new Date('1965-04-06').getTime(),endMs:new Date('1969-01-01').getTime(),pos:[6.5528,0.0,0.9267],col:[1,0.8,0.3],type:1,alt:35786},
+];
+// Store original positions (rotation is computed from origin, not accumulated)
+EARLY_SATS.forEach(e=>{ e.origPos=[e.pos[0],e.pos[1],e.pos[2]]; });
+let orbitDur = 12000;   // set fresh each ORBIT entry
+let inspectDur = 16000; // set fresh each INSPECT entry
+
+// ── Three.js setup ─────────────────────────────────────────────────────────────
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(50, innerWidth/innerHeight, 0.01, 2000);
+camera.position.set(0, 0, 18);
+
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.setSize(innerWidth,innerHeight);
+renderer.setClearColor(0x000000);
+document.body.prepend(renderer.domElement);
+
+// ── Camera animation state ───────────────────────────────────────────────────
+const camPos   = new THREE.Vector3(0,0,18);
+const camLook  = new THREE.Vector3(0,0,0);
+const camLookC = new THREE.Vector3(0,0,0); // current smoothed lookAt
+
+// ── Rings geometry (all Keplerian orbital ellipses) ──────────────────────────
+const rGeo = new THREE.BufferGeometry();
+const rPos = new Float32Array(MAX * RING_PTS * 2 * 3);
+const rCol = new Float32Array(MAX * RING_PTS * 2 * 3);
+rGeo.setAttribute('position', new THREE.BufferAttribute(rPos,3));
+rGeo.setAttribute('color',    new THREE.BufferAttribute(rCol,3));
+const rMat = new THREE.ShaderMaterial({
+  uniforms:{ uSunDir:{value:new THREE.Vector3(1,0,0)} },
+  vertexShader:`
+    uniform vec3 uSunDir; attribute vec3 color; varying vec3 vC;
+    void main(){
+      vec3 wp=normalize((modelMatrix*vec4(position,1.)).xyz);
+      float lit=smoothstep(-0.18,0.18,dot(wp,uSunDir));
+      vC=color*(0.05+0.95*lit);
+      gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);
+    }`,
+  fragmentShader:`varying vec3 vC;void main(){gl_FragColor=vec4(vC,1.);}`,
+  transparent:true,depthWrite:false,blending:THREE.AdditiveBlending
+});
+const rMesh = new THREE.LineSegments(rGeo, rMat);
+rMesh.renderOrder=-1;
+scene.add(rMesh);
+
+// ── Points geometry ───────────────────────────────────────────────────────────
+const pGeo = new THREE.BufferGeometry();
+const pPos = new Float32Array(MAX*3), pCol=new Float32Array(MAX*3), pSz=new Float32Array(MAX), pDebris=new Float32Array(MAX);
+pGeo.setAttribute('position', new THREE.BufferAttribute(pPos,3));
+pGeo.setAttribute('color',    new THREE.BufferAttribute(pCol,3));
+pGeo.setAttribute('size',     new THREE.BufferAttribute(pSz,1));
+pGeo.setAttribute('isDebris', new THREE.BufferAttribute(pDebris,1));
+const pMat = new THREE.ShaderMaterial({
+  uniforms:{ uSunDir:{value:new THREE.Vector3(1,0,0)} },
+  vertexShader:`
+    uniform vec3 uSunDir; attribute float size; attribute vec3 color; varying vec3 vC;
+    void main(){
+      vec3 wp=normalize((modelMatrix*vec4(position,1.)).xyz);
+      float lit=smoothstep(-0.12,0.12,dot(wp,uSunDir));
+      // aurora tint at terminator
+      float aur=exp(-abs(dot(wp,uSunDir)+0.02)*9.)*0.12;
+      vC=color*(0.18+0.82*lit)+vec3(0.12,0.25,0.6)*aur;
+      vec4 mv=modelViewMatrix*vec4(position,1.);
+      gl_PointSize=size*(680./-mv.z);
+      gl_Position=projectionMatrix*mv;
+    }`,
+  fragmentShader:`
+    varying vec3 vC;
+    void main(){
+      vec2 u=gl_PointCoord-0.5; float d=length(u);
+      if(d>0.5) discard;
+      float edge=1.-smoothstep(0.28,0.5,d);
+      float bright=1.-smoothstep(0.,0.22,d);
+      gl_FragColor=vec4(vC*(0.75+bright*0.4),edge*0.95);
+    }`,
+  transparent:true,depthWrite:false,blending:THREE.NormalBlending
+});
+scene.add(new THREE.Points(pGeo,pMat));
+
+
+// ── Projected future satellite model ──────────────────────────────────────
+// Rebuilt from the real catalog every load, and cached per calendar year:
+//   1. count how many satellites each constellation already has in orbit
+//   2. the projection adds what remains up to its filed ceiling
+//   3. those launches are spread evenly across the next ten years
+//   4. each one gets a real circular orbit in its constellation's shell, so it
+//      moves with the rest of the sky (same inertial frame as the catalog)
+// Positions come from a generator seeded by the current year + total catalog
+// count: stable on reload, shifting each January as the real data changes.
+// Ceilings are the filing figures quoted in ARTIST_STATEMENT.md. Edit here.
+const CONSTELLATIONS = [
+  { key:'STARLINK', label:'STARLINK (PROJECTED)', ceiling:42000, match:/^STARLINK/,
+    country:'USA / SpaceX', purpose:'BROADBAND INTERNET (STARLINK)',
+    shells:[{alt:[525,535],inc:53},{alt:[525,535],inc:43},{alt:[535,545],inc:33},{alt:[555,565],inc:97.6},{alt:[340,360],inc:53}] },
+  { key:'KUIPER', label:'KUIPER (PROJECTED)', ceiling:3236, match:/^(KUIPER|PROJECT KUIPER)/,
+    country:'USA / Amazon', purpose:'BROADBAND INTERNET (KUIPER)',
+    shells:[{alt:[625,635],inc:51.9},{alt:[605,615],inc:42},{alt:[585,595],inc:33}] },
+  { key:'ONEWEB', label:'ONEWEB (PROJECTED)', ceiling:6372, match:/^ONEWEB/,
+    country:'UK / Eutelsat OneWeb', purpose:'BROADBAND INTERNET (ONEWEB)',
+    shells:[{alt:[1195,1205],inc:87.9},{alt:[1195,1205],inc:55}] },
+  { key:'CONSTELLATION', label:'CHINESE CONSTELLATION (PROJECTED)', ceiling:26992, match:/^(GUOWANG|HULIANWANG|QIANFAN|SPACESAIL|HONGHU|G60)/,
+    country:'China (Guowang / Qianfan)', purpose:'BROADBAND INTERNET (GUOWANG / QIANFAN)',
+    shells:[{alt:[1060,1080],inc:89},{alt:[1140,1160],inc:50},{alt:[500,600],inc:55}] },
+];
+const PROJ_COL = [0.85,0.35,1.0];          // magenta/violet: distinct from gov (blue) and private (warm)
+const PROJ_YEARS = 10, YEAR_MS = 365.25*86400000;
+const PROJECTION_CACHE_KEY = 'crowded-sky-projection-v5';
+const PROJ_OBJS = [];
+let projVisibleCount = 0;
+let projSummary = null;
+let NOW_MS = Date.now();   // 'today' — moved forward by the daily refresh
+
+function mulberry32(a){ return ()=>{ a=(a+0x6D2B79F5)|0; let t=Math.imul(a^a>>>15,1|a); t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
+
+function initProjectedSatellites(){
+  PROJ_OBJS.length = 0;                     // rebuild, never append
+  const year = new Date().getUTCFullYear();
+  const real = objects.filter(o=>!o.isProjected);
+  const counts = {};
+  for(const c of CONSTELLATIONS) counts[c.key] = real.filter(o=>c.match.test((o.name||'').toUpperCase())).length;
+  // Debris: observed rate = objects of debris type launched in the last 5 years, per year
+  const recentDebris = real.filter(o=>o.type===2 && o.launchMs>NOW_MS-5*YEAR_MS).length;
+  const debrisPerYear = recentDebris/5;
+  const rng = mulberry32((year*1000003 + real.length)>>>0);
+  const plan = [];
+  for(const c of CONSTELLATIONS){
+    const remaining = Math.max(0, c.ceiling - counts[c.key]);
+    plan.push({c, n:remaining});
+  }
+  plan.push({c:{key:'DEBRIS', label:'PROJECTED DEBRIS', isDebris:true,
+    shells:[{alt:[400,900],inc:null}]}, n:Math.round(debrisPerYear*PROJ_YEARS)});
+  for(const {c,n} of plan){
+    for(let i=0;i<n;i++){
+      const sh = c.shells[Math.floor(rng()*c.shells.length)];
+      const alt = sh.alt[0] + rng()*(sh.alt[1]-sh.alt[0]);
+      const incDeg = sh.inc==null ? rng()*98 : sh.inc + (rng()-0.5)*0.4;
+      const r = (alt+6371)/6371;
+      const mm = 86400/(2*Math.PI*Math.sqrt(Math.pow((alt+6371)*1000,3)/3.986004418e14)); // rev/day
+      const inc = incDeg*Math.PI/180, raan = rng()*Math.PI*2, u0 = rng()*Math.PI*2;
+      PROJ_OBJS.push({
+        isProjected:true, projKey:c.key, name:c.label, norad:null, type:c.isDebris?2:1,
+        alt, r, inc, raan, u0, mm, ecc:0,
+        ci:Math.cos(inc), si:Math.sin(inc), cr:Math.cos(raan), sr:Math.sin(raan),
+        appearMs: NOW_MS + ((i+0.5)/n)*PROJ_YEARS*YEAR_MS,   // even spread over the horizon
+        pos:[0,0,0], col:PROJ_COL,
+        projId:`proj_${c.key}_${i}`,
+      });
+    }
+  }
+  PROJ_OBJS.sort((a,b)=>a.appearMs-b.appearMs);
+  projSummary = {year, catalog:real.length, counts, debrisPerYear:+debrisPerYear.toFixed(1),
+                 added:Object.fromEntries(plan.map(p=>[p.c.key,p.n])), total:PROJ_OBJS.length};
+  try{ localStorage.setItem(PROJECTION_CACHE_KEY, JSON.stringify(projSummary)); }catch(e){}
+  console.log('[Crowded Sky] Projection model', projSummary);
+}
+
+// circular orbit, same convention as propagate() with argp=0
+function propagateProjected(o,t){
+  const u = o.u0 + o.mm*2*Math.PI*(t-NOW_MS)/86400000;
+  const cu=Math.cos(u), su=Math.sin(u), r=o.r;
+  o.pos[0]=r*(o.cr*cu - o.sr*o.ci*su);
+  o.pos[1]=r*(o.sr*cu + o.cr*o.ci*su);
+  o.pos[2]=r*(o.si*su);
+  return o.pos;
+}
+
+// Timeline geometry — separate from main pGeo so it renders distinctly
+const projGeo = new THREE.BufferGeometry();
+const PROJ_MAX = 120000;
+const projPos = new Float32Array(PROJ_MAX*3);
+const projCol = new Float32Array(PROJ_MAX*3);
+const projSz  = new Float32Array(PROJ_MAX);
+const projDebris = new Float32Array(PROJ_MAX);
+projGeo.setAttribute('position', new THREE.BufferAttribute(projPos,3));
+projGeo.setAttribute('color',    new THREE.BufferAttribute(projCol,3));
+projGeo.setAttribute('size',     new THREE.BufferAttribute(projSz,1));
+projGeo.setAttribute('isDebris', new THREE.BufferAttribute(projDebris,1));
+const projMesh = new THREE.Points(projGeo, pMat); // reuse pMat shader
+scene.add(projMesh);
+
+function updateProjectedSatellites(){
+  if(simTime <= NOW_MS){ projGeo.setDrawRange(0,0); projVisibleCount=0; return; }
+  let vi=0;
+  const n=Math.min(PROJ_OBJS.length,PROJ_MAX);
+  for(let i=0;i<n;i++){
+    const o=PROJ_OBJS[i];
+    if(o.appearMs>simTime) break;          // sorted by appearance
+    const p=propagateProjected(o,simTime);
+    projPos[vi*3]=p[0]; projPos[vi*3+1]=p[1]; projPos[vi*3+2]=p[2];
+    projCol[vi*3]=o.col[0]; projCol[vi*3+1]=o.col[1]; projCol[vi*3+2]=o.col[2];
+    projSz[vi] = o.type===2 ? 0.040 : 0.038;
+    projDebris[vi] = o.type===2 ? 1.0 : 0.0;
+    vi++;
+  }
+  projGeo.setDrawRange(0,vi);
+  projGeo.attributes.position.needsUpdate=true;
+  projGeo.attributes.color.needsUpdate=true;
+  projGeo.attributes.size.needsUpdate=true;
+  projGeo.attributes.isDebris.needsUpdate=true;
+  projVisibleCount=vi;
+}
+
+// Rebuild orbit rings for only the currently visible objects
+let lastRingCount = -1;
+function rebuildRings(visibleObjs){
+  if(Math.abs(visibleObjs.length - lastRingCount) < 5) return; // throttle
+  lastRingCount = visibleObjs.length;
+  let rv = 0;
+  for(const o of visibleObjs){
+    rv = buildRing(o, rv);
+  }
+  rGeo.setDrawRange(0, rv);
+  rGeo.attributes.position.needsUpdate = true;
+  rGeo.attributes.color.needsUpdate    = true;
+}
+
+// ── Target highlight — always-bright single point, ignores terminator ────────────
+// When an object is locked/zoomed, this glows at full brightness so it's
+// visible even when it's on the night side of Earth.
+const thlGeo=new THREE.BufferGeometry();
+const thlPos=new Float32Array(3), thlSz=new Float32Array([0.55]);
+thlGeo.setAttribute('position',new THREE.BufferAttribute(thlPos,3));
+thlGeo.setAttribute('size',    new THREE.BufferAttribute(thlSz,1));
+const thlMat=new THREE.ShaderMaterial({
+  uniforms:{uTime:{value:0}},
+  vertexShader:`attribute float size;
+    void main(){vec4 mv=modelViewMatrix*vec4(position,1.);
+    gl_PointSize=size*(680./-mv.z);gl_Position=projectionMatrix*mv;}`,
+  fragmentShader:`uniform float uTime;
+    void main(){
+      vec2 u=gl_PointCoord-0.5;float d=length(u);if(d>.5)discard;
+      float pulse=0.78+0.22*sin(uTime*3.8);
+      float core=1.-smoothstep(0.,.12,d);
+      float mid =1.-smoothstep(0.,.32,d);
+      float halo=1.-smoothstep(0.,.5,d);
+      gl_FragColor=vec4(1.,0.90,0.60,core*0.98+mid*0.45*pulse+halo*0.22);}`,
+  transparent:true,depthWrite:false,depthTest:false,blending:THREE.AdditiveBlending
+});
+const thlMesh=new THREE.Points(thlGeo,thlMat);
+thlMesh.visible=false;
+scene.add(thlMesh);
+
+// ── Kepler propagation ────────────────────────────────────────────────────────
+function propagate(o,t){
+  const dt=(t-o.epoch_ms)/86400000;
+  let M=(o.M0+o.mm*2*Math.PI*dt)%(2*Math.PI);
+  if(M<0)M+=2*Math.PI;
+  const ec=o.ecc; let E=M;
+  for(let k=0;k<8;k++) E=M+ec*Math.sin(E);
+  const nu=2*Math.atan2(Math.sqrt(1+ec)*Math.sin(E/2),Math.sqrt(1-ec)*Math.cos(E/2));
+  const r=o.sma*(1-ec*Math.cos(E));
+  const xo=r*Math.cos(nu),yo=r*Math.sin(nu);
+  const{inc:i,raan:ra,argp:w}=o;
+  const ci=Math.cos(i),si=Math.sin(i),co=Math.cos(ra),so=Math.sin(ra),cw=Math.cos(w),sw=Math.sin(w);
+  return[(co*cw-so*sw*ci)*xo+(-co*sw-so*cw*ci)*yo,
+         (so*cw+co*sw*ci)*xo+(-so*sw+co*cw*ci)*yo,
+         sw*si*xo+cw*si*yo];
+}
+
+function smaFromMM(mm){ // mm=rev/day → sma in Earth radii
+  const n=mm*2*Math.PI/86400;
+  return Math.pow(398600.4418/(n*n),1/3)/6371;
+}
+
+// ── Colour helpers ────────────────────────────────────────────────────────────
+function typeColor(t){
+  if(t===2) return [0.50,0.52,0.58]; // debris — cool grey
+  if(t===1) return [0.38,0.70,1.00]; // government — cool blue
+  return [1.00,0.75,0.35];            // private — warm amber
+}
+function typeSize(t,alt){
+  if(alt>20000) return 0.12;
+  return t===2 ? 0.030 : t===1 ? 0.055 : 0.048;
+}
+
+// ── Objects store ─────────────────────────────────────────────────────────────
+let objects = [];
+let knownNorads = new Set();
+
+// ── Build ring for one object ─────────────────────────────────────────────────
+function buildRing(o,vi){
+  const rp=rPos, rc=rCol;
+  if(!o.sma||o.inc==null||o.raan==null||o.argp==null||o.sma<1.03||o.sma>10) return vi;
+  const {sma:a,inc,raan:ra,argp:w,ecc:ec}=o;
+  const [cr,cg,cb]=o.col;
+  const altF=Math.min(2.5, 0.25+o.alt/8000);
+  const dim = o.type===2 ? 0.004 : o.type===1 ? 0.008 : 0.003; // very dim to prevent additive blending bloom
+  const rc2=cr*dim*altF, gc2=cg*dim*altF, bc2=cb*dim*altF;
+  const ci=Math.cos(inc),si=Math.sin(inc),co=Math.cos(ra),so=Math.sin(ra),cw=Math.cos(w),sw=Math.sin(w);
+  const pts=[];
+  for(let k=0;k<RING_PTS;k++){
+    const nu=(k/RING_PTS)*2*Math.PI;
+    const r=a*(1-ec*ec)/(1+ec*Math.cos(nu));
+    const xo=r*Math.cos(nu),yo=r*Math.sin(nu);
+    pts.push([(co*cw-so*sw*ci)*xo+(-co*sw-so*cw*ci)*yo,
+              (so*cw+co*sw*ci)*xo+(-so*sw+co*cw*ci)*yo,
+              sw*si*xo+cw*si*yo]);
+  }
+  for(let k=0;k<RING_PTS;k++){
+    const a=pts[k],b=pts[(k+1)%RING_PTS];
+    const base=vi*3;
+    rp[base]=a[0];rp[base+1]=a[1];rp[base+2]=a[2];
+    rp[base+3]=b[0];rp[base+4]=b[1];rp[base+5]=b[2];
+    rc[base]=rc2;rc[base+1]=gc2;rc[base+2]=bc2;
+    rc[base+3]=rc2;rc[base+4]=gc2;rc[base+5]=bc2;
+    vi+=2;
+  }
+  return vi;
+}
+
+// Per-frame: propagate positions to simTime, show only launched objects
+// Objects are sorted by NORAD (approx launch order), so we can use setDrawRange.
+function updatePositions(){
+  const n=Math.min(objects.length,MAX);
+  let visible=0;
+  const _visibleObjs = [];
+  // First: render synthetic early satellites
+  for(const e of EARLY_SATS){
+    if(e.launchMs>simTime||simTime>e.endMs) continue;
+    if(knownNorads.has(e.norad)) continue;   // still in the real catalog (e.g. Vanguard 1): draw it once, from real data
+    // Rotate from ORIGINAL position (not accumulated) to avoid drift
+    const rot=(simTime-e.launchMs)/(e.alt<2000?5400000:e.alt<10000?21600000:86400000);
+    const c=Math.cos(rot),ss=Math.sin(rot);
+    const x=e.origPos[0]*c-e.origPos[2]*ss, z=e.origPos[0]*ss+e.origPos[2]*c;
+    e.pos[0]=x; e.pos[2]=z; // update pos for camera targeting
+    pPos[visible*3]=x; pPos[visible*3+1]=e.pos[1]; pPos[visible*3+2]=z;
+    pCol[visible*3]=e.col[0]; pCol[visible*3+1]=e.col[1]; pCol[visible*3+2]=e.col[2];
+    // Make early sats bigger when catalog hasn't loaded yet so they're visible
+    const isLoading = objects.length === 0;
+    pSz[visible]=isLoading ? 0.28 : 0.08;
+    pDebris[visible]=0.0;
+    visible++;
+  }
+  for(let i=0;i<n;i++){
+    const o=objects[i];
+    o.renderIdx=-1;
+    const launchMs=o.launchMs||estimateLaunchMs(o.norad);
+    if(launchMs>simTime){
+      // Since sorted by NORAD (launch order), once we hit future objects we can stop
+      // BUT some NORAD ranges overlap, so keep scanning but skip
+      continue;
+    }
+    // Propagate position to simTime
+    if(o.sma&&o.mm&&o.epoch_ms){
+      const np=propagate(o,simTime);
+      if(np&&!isNaN(np[0])){ o.pos=np; }
+    }
+    pPos[visible*3]=o.pos[0]; pPos[visible*3+1]=o.pos[1]; pPos[visible*3+2]=o.pos[2];
+    pCol[visible*3]=o.col[0]; pCol[visible*3+1]=o.col[1]; pCol[visible*3+2]=o.col[2];
+    pSz[visible]=typeSize(o.type,o.alt);
+    pDebris[visible]=o.type===2?1.0:0.0;
+    o.renderIdx=visible;
+    _visibleObjs.push(o);
+    visible++;
+  }
+  pGeo.setDrawRange(0,visible);
+  pGeo.attributes.position.needsUpdate=true;
+  pGeo.attributes.color.needsUpdate=true;
+  pGeo.attributes.size.needsUpdate=true;
+  pGeo.attributes.isDebris.needsUpdate=true;
+  const totalVisible=visible+projVisibleCount;
+  const projStr=projVisibleCount>0?` + ${projVisibleCount.toLocaleString()} PROJECTED`:''; 
+  document.getElementById('tl-obj-count').textContent=totalVisible.toLocaleString()+(projVisibleCount>0?' TOTAL':' OBJECTS');
+  // Rebuild orbit rings to match currently visible objects
+  rebuildRings(_visibleObjs);
+}
+
+function rebuildGeometry(){
+  const n=Math.min(objects.length,MAX);
+  let rv=0;
+  for(let i=0;i<n;i++){
+    const o=objects[i];
+    o.idx=i; // store index for per-frame target boost
+    pPos[i*3]=o.pos[0]; pPos[i*3+1]=o.pos[1]; pPos[i*3+2]=o.pos[2];
+    pCol[i*3]=o.col[0]; pCol[i*3+1]=o.col[1]; pCol[i*3+2]=o.col[2];
+    pSz[i]=typeSize(o.type,o.alt);
+    pDebris[i]=o.type===2?1.0:0.0;
+    rv=buildRing(o,rv);
+  }
+  pGeo.attributes.position.needsUpdate=true;
+  pGeo.attributes.color.needsUpdate=true;
+  pGeo.attributes.size.needsUpdate=true;
+  pGeo.setDrawRange(0,n);
+  rGeo.attributes.position.needsUpdate=true;
+  rGeo.attributes.color.needsUpdate=true;
+  rGeo.setDrawRange(0,rv);
+  // obj-count updated by updatePositions via tl-obj-count
+  buildBinaryScroll();
+}
+
+// ── Notable satellite metadata ────────────────────────────────────────────────
+const META = {
+  // Space telescopes & observatories
+  20580: {purpose:'SPACE TELESCOPE',country:'USA / NASA',launched:'1990-04-24',note:'Hubble Space Telescope. Low-Earth orbit. Over 1.5 million scientific observations across UV, visible, and near-infrared wavelengths. Serviced 5 times by Space Shuttle crews.'},
+  25867: {purpose:'X-RAY OBSERVATORY',country:'USA / NASA',launched:'1999-07-23',note:'Chandra X-ray Observatory. Highly elliptical orbit reaching 134,000 km. Observes X-ray emission from high-energy regions: black holes, neutron stars, galaxy clusters. Longest-lived NASA Great Observatory.'},
+  25989: {purpose:'X-RAY / UV OBSERVATORY',country:'ESA',launched:'1999-12-10',note:'XMM-Newton. Highly elliptical orbit. European Space Agency X-ray and UV telescope. Studies neutron stars, active galactic nuclei, galaxy clusters.'},
+  28485: {purpose:'GAMMA-RAY / X-RAY OBSERVATORY',country:'USA / NASA',launched:'2004-11-20',note:'Neil Gehrels Swift Observatory. Detects and characterizes gamma-ray bursts in real time. Multi-wavelength follow-up within 90 seconds. Over 1,400 GRBs detected.'},
+  38358: {purpose:'HARD X-RAY TELESCOPE',country:'USA / NASA',launched:'2012-06-13',note:'NuSTAR. First focusing hard X-ray telescope. Studies black holes, supernovae remnants, neutron stars. 10-79 keV energy range.'},
+  69123: {purpose:'SOLAR WIND SCIENCE',country:'ESA / CAS',launched:'2024-10-14',note:'SMILE (Solar wind Magnetosphere Ionosphere Link Explorer). Joint ESA-China mission. Studies the interaction between solar wind and Earth\'s magnetosphere in X-ray and UV.'},
+  // Weather & Earth observation
+  35491: {purpose:'WEATHER OBSERVATION',country:'USA / NOAA',launched:'2009-06-27',note:'GOES-14 (now EWS-G3). Geostationary. Currently in on-orbit storage. Available as backup coverage for Western Hemisphere weather monitoring.'},
+  36411: {purpose:'WEATHER OBSERVATION',country:'USA / NOAA',launched:'2010-03-04',note:'GOES-15 (now EWS-G2). Geostationary. Provides backup meteorological coverage. 37 years of continuous geostationary weather observation in GOES program.'},
+  41866: {purpose:'WEATHER OBSERVATION (ACTIVE)',country:'USA / NOAA',launched:'2016-11-19',note:'GOES-16. Primary eastern US geostationary weather satellite. Full-disk Earth imagery every 10 minutes, CONUS every 5 minutes. 16-channel ABI imager.'},
+  43226: {purpose:'WEATHER OBSERVATION (ACTIVE)',country:'USA / NOAA',launched:'2018-03-01',note:'GOES-17. Western US geostationary coverage. Advanced Baseline Imager. Real-time lightning mapping, sea surface temperature, wildfire detection.'},
+  51850: {purpose:'WEATHER OBSERVATION (ACTIVE)',country:'USA / NOAA',launched:'2022-03-01',note:'GOES-18. Replaced GOES-17 as GOES-West primary. Full-disk imagery every 10 minutes. Critical for Pacific coast and western US weather forecasting.'},
+  37849: {purpose:'EARTH OBSERVATION',country:'USA / NOAA / NASA',launched:'2011-10-28',note:'Suomi NPP. Sun-synchronous polar orbit at 824 km. VIIRS instrument provides daily global coverage in 22 spectral bands. Key climate data record continuity mission.'},
+  43013: {purpose:'WEATHER / CLIMATE OBSERVATION',country:'USA / NOAA',launched:'2017-11-18',note:'NOAA-20 / JPSS-1. Joint Polar Satellite System. 824 km sun-synchronous orbit. Advanced VIIRS imager provides global coverage twice daily in 22 spectral bands.'},
+  54234: {purpose:'WEATHER / CLIMATE OBSERVATION',country:'USA / NOAA',launched:'2022-11-10',note:'NOAA-21 / JPSS-2. Newest in the JPSS series. Carries VIIRS, ATMS, CrIS, OMPS instruments. Global temperature and moisture sounding for 7-day forecasts.'},
+  28912: {purpose:'WEATHER OBSERVATION',country:'ESA / EUMETSAT',launched:'2005-12-21',note:'Meteosat-9 (MSG-2). Geostationary over Europe and Africa. 15-minute full-disk imagery. SEVIRI instrument, 12 spectral channels.'},
+  38552: {purpose:'WEATHER OBSERVATION',country:'ESA / EUMETSAT',launched:'2012-07-05',note:'Meteosat-10 (MSG-3). Geostationary. Rapid Scan Service: Europe imagery every 5 minutes. Essential for severe weather nowcasting across Europe.'},
+  // Science missions
+  40482: {purpose:'SPACE PHYSICS RESEARCH',country:'USA / NASA',launched:'2015-03-12',note:'MMS-1 (Magnetospheric Multiscale Mission). Highly elliptical orbit reaching 152,900 km. Studies magnetic reconnection — the process that drives solar storms and auroras — at electron scales.'},
+  40483: {purpose:'SPACE PHYSICS RESEARCH',country:'USA / NASA',launched:'2015-03-12',note:'MMS-2. Formation flight with MMS 1, 3, and 4. Apogee in magnetotail phase: ~152,000 km. Four-spacecraft tetrahedron formation resolves 3D magnetic field structure at sub-km scales.'},
+  40484: {purpose:'SPACE PHYSICS RESEARCH',country:'USA / NASA',launched:'2015-03-12',note:'MMS-3. Studies how magnetic field lines break and reconnect, releasing enormous energy bursts. Data collected at 100 samples/second — fastest plasma measurements ever.'},
+  40485: {purpose:'SPACE PHYSICS RESEARCH',country:'USA / NASA',launched:'2015-03-12',note:'MMS-4. Outermost vertex of the MMS tetrahedron. Separation distance adjustable from 10 km to 400 km depending on science objective.'},
+  26410: {purpose:'MAGNETOSPHERE RESEARCH',country:'ESA',launched:'2000-07-16',note:'Cluster II SAMBA. One of four identical spacecraft flying in tetrahedral formation through Earth\'s magnetosphere. Studies plasma structures in 3D. Highly elliptical orbit.'},
+  26464: {purpose:'MAGNETOSPHERE RESEARCH',country:'ESA',launched:'2000-07-16',note:'Cluster II TANGO. Formation partner with SAMBA, RUMBA, SALSA. Now operating as a pair after two spacecraft deorbited. Orbit perigee inside magnetopause.'},
+  36508: {purpose:'CRYOSPHERE OBSERVATION',country:'ESA',launched:'2010-04-08',note:'CryoSat-2. Polar orbit at 92° inclination. Radar altimeter measures thickness of Arctic sea ice and Greenland/Antarctic ice sheets. Critical climate change indicator.'},
+  39451: {purpose:'GEOMAGNETIC FIELD RESEARCH',country:'ESA',launched:'2013-11-22',note:'Swarm B. One of three Swarm satellites mapping Earth\'s magnetic field with unprecedented precision. Altitude ~510 km. Data feeds geomagnetic field models and navigation systems.'},
+};
+
+function getMeta(norad){
+  return META[norad] || null;
+}
+
+// Infer country and approximate launch year for any satellite not in META
+function inferPurpose(name){
+  const n=(name||'').toUpperCase();
+  if(/^STARLINK/.test(n))           return 'BROADBAND INTERNET (STARLINK)';
+  if(/^ONEWEB/.test(n))             return 'BROADBAND INTERNET (ONEWEB)';
+  if(/^VIASAT/.test(n))             return 'BROADBAND INTERNET';
+  if(/^GPS\b|^NAVSTAR/.test(n))    return 'NAVIGATION (GPS)';
+  if(/^BEIDOU/.test(n))             return 'NAVIGATION (BEIDOU)';
+  if(/^IRNSS|^NAVIC/.test(n))       return 'NAVIGATION (INDIA)';
+  if(/^QZS/.test(n))                return 'NAVIGATION (JAPAN)';
+  if(/^GLONASS/.test(n))            return 'NAVIGATION (GLONASS)';
+  if(/^GALILEO/.test(n))            return 'NAVIGATION (GALILEO)';
+  if(/^FENGYUN|^TIANMU/.test(n))    return 'WEATHER OBSERVATION (CHINA)';
+  if(/^METEOSAT/.test(n))           return 'WEATHER OBSERVATION (ESA)';
+  if(/^GOES|^NOAA/.test(n))         return 'WEATHER OBSERVATION (NOAA)';
+  if(/^METEOR|^ELECTRO/.test(n))    return 'WEATHER OBSERVATION (RUSSIA)';
+  if(/^ISS|^ZARYA|^NAUKA|^ZVEZDA|^PROGRESS|^SOYUZ/.test(n)) return 'SPACE STATION (ISS)';
+  if(/^TIANHE|^WENTIAN|^MENGTIAN/.test(n)) return 'SPACE STATION (CHINA)';
+  if(/^TDRS/.test(n))               return 'TRACKING & DATA RELAY (NASA)';
+  if(/^TIANLIAN/.test(n))           return 'DATA RELAY (CHINA)';
+  if(/^LUCH/.test(n))               return 'DATA RELAY (RUSSIA)';
+  if(/^AEHF|^WGS|^MUOS|^UFO\b/.test(n)) return 'MILITARY COMMUNICATIONS (USA)';
+  if(/^SKYNET/.test(n))             return 'MILITARY COMMUNICATIONS (UK)';
+  if(/^SBIRS/.test(n))              return 'MISSILE WARNING (USA)';
+  if(/^USA\b/.test(n))              return 'CLASSIFIED (USA)';
+  if(/^TJS/.test(n))                return 'MILITARY COMMUNICATIONS (CHINA)';
+  if(/^SHIJIAN/.test(n))            return 'TECHNOLOGY EXPERIMENT (CHINA)';
+  if(/^ZHONGXING|^CHINASAT/.test(n)) return 'COMMUNICATIONS (CHINA)';
+  if(/^COSMOS/.test(n))             return 'MILITARY / UNKNOWN (RUSSIA)';
+  if(/^INTELSAT/.test(n))           return 'COMMUNICATIONS (INTELSAT)';
+  if(/^INMARSAT/.test(n))           return 'MOBILE COMMUNICATIONS';
+  if(/^EUTELSAT/.test(n))           return 'COMMUNICATIONS (EUTELSAT)';
+  if(/^SES\b|^ASTRA/.test(n))       return 'COMMUNICATIONS (SES)';
+  if(/^EXPRESS|^YAMAL|^LUCH/.test(n)) return 'COMMUNICATIONS (RUSSIA)';
+  if(/^GSAT/.test(n))               return 'COMMUNICATIONS (INDIA)';
+  if(/^JCSAT/.test(n))              return 'COMMUNICATIONS (JAPAN)';
+  if(/^OPTUS/.test(n))              return 'COMMUNICATIONS (AUSTRALIA)';
+  if(/^APSTAR|^ZHONGXING/.test(n))  return 'COMMUNICATIONS (CHINA)';
+  if(/^KOREASAT/.test(n))           return 'COMMUNICATIONS (KOREA)';
+  if(/^TURKSAT/.test(n))            return 'COMMUNICATIONS (TURKEY)';
+  if(/^DIRECTV|^NIMIQ|^BSAT/.test(n)) return 'BROADCAST TELEVISION';
+  if(/^GALAXY|^ECHOSTAR|^TELSTAR|^INTELSAT|^NSS|^ABS|^ARABSAT|^AMAZONAS|^ANIK/.test(n)) return 'COMMUNICATIONS';
+  if(/DEB$|DEBRIS/.test(n))         return 'ORBITAL DEBRIS';
+  if(/R\/B/.test(n))               return 'ROCKET BODY (DEBRIS)';
+  if(/^OBJECT/.test(n))             return 'UNIDENTIFIED OBJECT';
+  return null;
+}
+
+function inferFields(obj){
+  const n=(obj.name||'').toUpperCase();
+  const id=obj.norad||0;
+
+  // Country from name patterns
+  let country='—';
+  if(n.includes('STARLINK'))              country='USA / SpaceX';
+  else if(n.includes('ONEWEB'))          country='UK / OneWeb';
+  else if(n.includes('KUIPER'))          country='USA / Amazon';
+  else if(n.includes('IRIDIUM'))         country='USA / Iridium LLC';
+  else if(n.includes('GLOBALSTAR'))      country='USA / Globalstar';
+  else if(n.includes('ORBCOMM'))         country='USA / Orbcomm';
+  else if(n.includes('GPS')||n.includes('NAVSTAR')) country='USA / Department of Defense';
+  else if(n.includes('GLONASS'))         country='Russia / Ministry of Defense';
+  else if(n.includes('GALILEO')||n.includes('GSAT0')) country='European Union / ESA';
+  else if(n.includes('BEIDOU')||n.includes('COMPASS')) country='China / CAST';
+  else if(n.includes('QZSS')||n.includes('MICHIBIKI')) country='Japan / JAXA';
+  else if(n.includes('NAVIC')||n.includes('IRNSS')) country='India / ISRO';
+  else if(n.includes('COSMOS')||n.includes('RESURS')||n.includes('MOLNIYA')) country='Russia';
+  else if(n.includes('FENGYUN')||n.includes('SHIJIAN')||n.includes('TIANHUI')||n.includes('YAOGAN')) country='China';
+  else if(n.includes('NOAA')||n.includes('GOES')||n.includes('JPSS')||n.includes('EWS-G')) country='USA / NOAA';
+  else if(n.includes('METEOSAT')||n.includes('MSG-')||n.includes('METOP')) country='Europe / EUMETSAT';
+  else if(n.includes('SENTINEL')||n.includes('ENVISAT')||n.includes('CRYOSAT')||n.includes('SWARM')||n.includes('CLUSTER')) country='ESA';
+  else if(n.includes('HIMAWARI'))        country='Japan / JMA';
+  else if(n.includes('INTELSAT'))        country='USA / Intelsat';
+  else if(n.includes('SES-')||n.includes('ASTRA')) country='Luxembourg / SES';
+  else if(n.includes('EUTELSAT'))        country='France / Eutelsat';
+  else if(n.includes('INMARSAT'))        country='UK / Inmarsat';
+  else if(n.includes('MMS'))             country='USA / NASA';
+  else if(n.includes('SWIFT')||n.includes('NUSTAR')||n.includes('FERMI')) country='USA / NASA';
+  else if(n.includes('XMM')||n.includes('INTEGRAL')||n.includes('HERSCHEL')||n.includes('PLANCK')) country='ESA';
+  else if(n.includes('SMILE'))           country='ESA / China';
+  else if(n.includes('USA-'))            country='USA / NRO (classified)';
+  else if(n.includes('NROL-'))           country='USA / NRO (classified)';
+  else if(obj.country)                   country=obj.country;          // catalog COUNTRY_CODE
+  else if(obj.type===1)                  country='Government / classified';
+
+  // Approximate launch year from NORAD ID (sequential assignment)
+  let launched='—';
+  if(obj.launchExact){
+    launched=new Date(obj.launchMs).toISOString().slice(0,10);
+  } else if(id>0){
+    if(id<1500)       launched='~1958–1960';
+    else if(id<5000)  launched='~1961–1969';
+    else if(id<10000) launched='~1970–1979';
+    else if(id<16000) launched='~1980–1989';
+    else if(id<25000) launched='~1990–1999';
+    else if(id<34000) launched='~2000–2009';
+    else if(id<40000) launched='~2010–2014';
+    else if(id<44000) launched='~2015–2018';
+    else if(id<48000) launched='~2019–2020';
+    else if(id<53000) launched='~2021–2022';
+    else if(id<58000) launched='~2023';
+    else if(id<63000) launched='~2024';
+    else              launched='~2025–2026';
+  }
+
+  return {country, launched};
+}
+
+// ── Data panel rendering ──────────────────────────────────────────────────────
+let typeTimer=null;
+
+function typeField(el, html, delay){
+  return new Promise(res=>{
+    setTimeout(()=>{
+      el.innerHTML='';
+      let i=0;
+      const full=html;
+      // Fast type for HTML content (don't break tags)
+      el.innerHTML=full;
+      res();
+    }, delay);
+  });
+}
+
+
+const PROJ_STORY_IDX = {STARLINK:0, KUIPER:0, ONEWEB:0, CONSTELLATION:0, DEBRIS:0};
+
+// ── Short factual notes for projected satellites (written with Ashley) ─────────
+const PROJ_NOTES = {
+  'STARLINK': [
+    `Broadband communications satellite, SpaceX Starlink V3. Provides 200Mbps downlink to subscribers across 48 countries. Part of a batch of 57. The launch was the 23rd Falcon 9 flight of that month. A new record was set. The previous record had been set the month before.`,
+    `Starlink commercial relay. Has performed 31 autonomous collision avoidance maneuvers in its first year of operation. Eight were to avoid other Starlink satellites. Four were to avoid Kuiper satellites. SpaceX describes the avoidance rate as nominal.`,
+    `Low-Earth broadband satellite. FCC license requires deorbit within 5 years of end of mission. End of mission is self-reported. Propellant budget is sufficient for deorbit from this altitude. The 5-year window has been described as conservative.`,
+    `Starlink V3.2 broadband relay. One of 12,000 authorized in this orbital shell alone. When fully deployed, the constellation will outnumber all stars visible to the naked eye from Earth. This fact appears in SpaceX investor materials. It is presented positively.`,
+  ],
+  'KUIPER': [
+    `Amazon Kuiper broadband satellite. Amazon deployed 51% of the constellation by the FCC's 2026 regulatory deadline. This satellite is in the remaining 49%. The remaining 49% is on an updated schedule. The updated schedule is not public.`,
+    `Low-Earth communications satellite, Amazon Kuiper Phase 2. Shares this orbital altitude with four active NOAA weather platforms. Frequency coordination between Kuiper and NOAA is ongoing. Ongoing is a technical term meaning unresolved but not yet a problem.`,
+    `Kuiper broadband relay. Jeff Bezos personally attended the first Kuiper launch in a cowboy hat. The hat was not rated for orbital conditions. This satellite is in orbit. Jeff Bezos is not.`,
+    `Amazon broadband satellite. Deorbit propellant: sufficient. Deorbit timeline: 5 years post-mission. Technology to independently verify deorbit compliance: pending regulatory finalization. Amazon has expressed confidence in the timeline.`,
+  ],
+  'ONEWEB': [
+    `OneWeb broadband satellite. OneWeb declared bankruptcy in March 2020. The UK government purchased the company for £400 million in November 2020, citing national interest. This satellite entered the production queue in 2019 under the previous owners. It is unclear who gets credit.`,
+    `OneWeb Phase 2 communications satellite. Polar orbit at 1,200km places this satellite inside the outer Van Allen radiation belt. Radiation shielding is standard. Expected annual performance degradation is 12%. Mission lifetime is 7 years. The math is left as an exercise.`,
+    `OneWeb broadband relay. The UK government retains a golden share giving veto power over major decisions. The golden share has not been exercised. OneWeb has been acquired twice and restructured three times since the golden share was issued. The share remains valid.`,
+    `OneWeb satellite, Phase 2. Greg Wyler founded the company in 2012. He later left over a disagreement with SoftBank. The company went bankrupt. The UK bought it. SoftBank also invested in the UK government's purchase. The disagreement is ongoing in a different form.`,
+  ],
+  'CONSTELLATION': [
+    `Broadband communications satellite, China's Guowang national megaconstellation. Provides connectivity services to underserved regions. Also provides surface observation at 0.5m resolution. Both services are filed under a single program heading in the ITU submission.`,
+    `Chinese state megaconstellation satellite. 12,992 satellites planned. The ITU filing was submitted in 2020 and reserves all orbital slots. Filing orbital slots requires paperwork. Launching 12,992 satellites requires approximately $28 billion. The filing is current.`,
+    `State broadband satellite. China Satellite Network Group was established in 2021 specifically to build this constellation. The orbital slots were filed before the company existed. The slots are valid. The company is building the satellites. The order of operations is noted.`,
+    `Guowang broadband relay. This satellite shares its orbital altitude with Starlink V3 shells. The ITU coordination process for avoiding interference takes 7-10 years. Both constellations are fully deployed. The coordination process is ongoing.`,
+  ],
+  'DEBRIS': [
+    `Untracked debris fragment, altitude consistent with the Kuiper Phase 2 / Starlink V3 intersection zone. Size estimated 15-25cm. Does not appear in the current Space-Track catalog. Is present regardless.`,
+    `Secondary fragment from fragmentation event 2031-006, South Atlantic. Parent objects: two commercial broadband satellites. This was the fourth major fragmentation event of 2031. A Kessler Cascade has not been declared. The threshold for declaration is under active review.`,
+    `Rocket body fragment. Upper stage debris from a 2028 commercial launch vehicle. Controlled deorbit burn failed at T+12 seconds due to a software fault. Failure mode identified. Patch issued for future vehicles. This vehicle is not a future vehicle.`,
+    `Debris object, classified non-trackable. Estimated population of objects this size in LEO: 1 million. Currently tracked: 27,000. This object is in the untracked majority. Twenty-two active satellites share this orbital corridor. All performed avoidance maneuvers this year. They were avoiding other objects.`,
+  ],
+};
+
+// ── Projected satellite identity (clearly labelled as speculative) ──────────
+function generateProjectedData(obj){
+  const key = obj.projKey || 'CONSTELLATION';
+  const isDebris = obj.type===2 || key==='DEBRIS';
+  const C = CONSTELLATIONS.find(c=>c.key===key);
+  // Stable per-object designation. "PROJ-" so it can never be mistaken for a real NORAD number.
+  let h=0; for(const ch of obj.projId) h=(Math.imul(h,31)+ch.charCodeAt(0))|0;
+  const projNum = 10000 + (h>>>0)%90000;
+  const designation = `PROJ-${projNum}`;
+  const launchYr = new Date(obj.appearMs||simTime).getUTCFullYear();
+  const altKm = obj.alt;
+  const period_m = 1440/obj.mm;
+  const incDeg = (obj.inc*180/Math.PI).toFixed(2);
+  const raanDeg = (obj.raan*180/Math.PI).toFixed(2);
+  const m0Deg = (obj.u0*180/Math.PI).toFixed(4);
+  const epoch = new Date(obj.appearMs||simTime).toISOString().slice(0,19).replace('T',' ')+' UTC';
+  const pool = PROJ_NOTES[key] || [];
+  const noteIdx = PROJ_STORY_IDX[key] % Math.max(1,pool.length);
+  PROJ_STORY_IDX[key] = (noteIdx+1) % Math.max(1,pool.length);
+  return {
+    projected: true,
+    norad: designation,
+    name: designation,
+    constellation: isDebris ? 'PROJECTED DEBRIS' : (C ? C.label : 'PROJECTED'),
+    type: obj.type, alt: Math.round(altKm),
+    period: period_m.toFixed(1), inc: incDeg, ecc: '0.000000', raan: raanDeg,
+    mm: obj.mm.toFixed(8), m0: m0Deg, epoch,
+    country: isDebris ? '—' : (C ? C.country : '—'),
+    launched: `PROJECTED ~${launchYr}`,
+    purpose: (isDebris ? 'ORBITAL DEBRIS' : (C ? C.purpose : 'COMMUNICATIONS')) + ' (PROJECTED)',
+    classification: isDebris ? 'DEBRIS / NON-OPERATIONAL (PROJECTED)' : (key==='CONSTELLATION' ? 'COMMERCIAL / STATE (PROJECTED)' : 'COMMERCIAL / PRIVATE (PROJECTED)'),
+    note: pool[noteIdx] || '',
+    notice: 'THIS OBJECT DOES NOT EXIST YET',
+    sim_year: new Date(simTime).getUTCFullYear(),
+    warning: isDebris ? 'TRACKABLE DEBRIS — UNCONTROLLED OBJECT' : altKm<600 ? 'LOW ORBIT — ELEVATED COLLISION RISK ZONE' : null,
+    _num: projNum,
+  };
+}
+
+function buildProjectedDataPanel(obj){
+  const pd=generateProjectedData(obj);
+  currentProjectedData=pd;                 // the companion gets exactly what the screen shows
+  document.getElementById('dp-name').textContent=pd.name;
+  document.getElementById('dp-name').style.color='rgba(200,160,255,0.92)';
+  document.getElementById('dp-norad').textContent=pd.notice;
+  const fields=[
+    ['CONSTELLATION',pd.constellation],
+    ['CLASSIFICATION',pd.classification],['COUNTRY',pd.country],['LAUNCH',pd.launched],
+    ['PURPOSE',pd.purpose],['ALTITUDE',pd.alt.toLocaleString()+' km'],
+    ['ORBITAL PERIOD',pd.period+' min'],['INCLINATION',pd.inc+'°'],
+    ['ECCENTRICITY',pd.ecc],['RAAN',pd.raan+'°'],
+  ];
+  document.getElementById('dp-fields').innerHTML=fields.map(([l,v])=>`<div><span class="lbl">${esc(l)}</span><span class="val">${esc(v)}</span></div>`).join('');
+  document.getElementById('dp-tle').innerHTML=
+    `PROJECTED ORBITAL ELEMENTS<br>─────────────────────────<br>`+
+    `MEAN MOTION   ${esc(pd.mm)} rev/day<br>MEAN ANOMALY  ${esc(pd.m0)}°<br>ECCENTRICITY  ${esc(pd.ecc)}<br>EPOCH         ${esc(pd.epoch)}`;
+  function toBin(n,b=16){return(Math.abs(Math.round(n||0))>>>0).toString(2).padStart(b,'0');}
+  const bl=[toBin(pd._num,17)+' '+toBin(pd.alt,14),toBin(Math.round(parseFloat(pd.inc)*10000),18)+' '+toBin(0,23),toBin(Math.round(parseFloat(pd.raan)*10000),18)+' '+toBin(Math.round(parseFloat(pd.mm)*10000),16),toBin(pd._num,17)+' '+toBin(pd.alt,14)];
+  document.getElementById('dp-binary').innerHTML=bl.join('\n')+'<br>'+bl.join('\n');
+  const we=document.getElementById('dp-warning');
+  if(pd.warning){we.textContent='⚠ '+pd.warning;we.style.display='block';}else{we.style.display='none';}
+  document.getElementById('dp-purpose').textContent=pd.note;
+}
+
+function buildDataPanel(obj){
+  const meta=getMeta(obj.norad);
+  const period=obj.mm ? (1440/obj.mm).toFixed(1)+'min' : '—';
+  const altStr=obj.alt ? Math.round(obj.alt).toLocaleString()+' km' : '—';
+  const incDeg=obj.inc ? (obj.inc*180/Math.PI).toFixed(2)+'°' : '—';
+  const eccStr=obj.ecc ? obj.ecc.toFixed(6) : '—';
+  const raanDeg=obj.raan ? (obj.raan*180/Math.PI).toFixed(2)+'°' : '—';
+  const typeStr=obj.type===0?'COMMERCIAL / PRIVATE':obj.type===1?'GOVERNMENT / MILITARY':'DEBRIS / NON-OPERATIONAL';
+
+  document.getElementById('dp-name').textContent = obj.name;
+  document.getElementById('dp-name').style.color = '';   // reset after a projected (violet) card
+  document.getElementById('dp-norad').textContent = 'NORAD CATALOG №  '+(obj.norad||'—');
+
+  // Build fields
+  const inferred=inferFields(obj);
+  const fields=[
+    ['CLASSIFICATION', typeStr],
+    ['COUNTRY', meta?.country || inferred.country],
+    ['LAUNCHED', meta?.launched || inferred.launched],
+    ['PURPOSE', meta?.purpose || inferPurpose(obj.name) || (obj.type===2?'TRACKABLE DEBRIS':'—')],
+    ['ALTITUDE', altStr],
+    ['ORBITAL PERIOD', period],
+    ['INCLINATION', incDeg],
+    ['ECCENTRICITY', eccStr],
+    ['RAAN', raanDeg],
+  ];
+  document.getElementById('dp-fields').innerHTML=fields.map(([l,v])=>
+    `<div><span class="lbl">${esc(l)}</span><span class="val">${esc(v)}</span></div>`
+  ).join('');
+
+  // Reconstructed orbital elements (not real TLE checksums — raw data)
+  const mm=obj.mm?obj.mm.toFixed(8):'—';
+  const M0deg=obj.M0?(obj.M0*180/Math.PI).toFixed(4):'—';
+  const epoch=obj.epoch_ms?new Date(obj.epoch_ms).toISOString().slice(0,19).replace('T',' '):'—';
+  document.getElementById('dp-tle').innerHTML=
+    `ORBITAL ELEMENTS<br>`+
+    `─────────────────────────<br>`+
+    `MEAN MOTION   ${mm} rev/day<br>`+
+    `MEAN ANOMALY  ${M0deg}°<br>`+
+    `ECCENTRICITY  ${eccStr}<br>`+
+    `EPOCH         ${epoch} UTC`;
+
+  // Binary data derived from orbital params
+  function toBin(n,b=16){return(Math.abs(Math.round(n||0))>>>0).toString(2).padStart(b,'0');}
+  const binLines=[
+    toBin(obj.norad,17)+' '+toBin(Math.round(obj.alt),14),
+    toBin(Math.round((obj.inc||0)*10000),18)+' '+toBin(Math.round((obj.ecc||0)*1e7),23),
+    toBin(Math.round((obj.raan||0)*10000),18)+' '+toBin(Math.round(obj.mm*10000||0),16),
+    toBin(obj.norad,17)+' '+toBin(Math.round(obj.alt),14),
+    toBin(Math.round((obj.inc||0)*10000),18)+' '+toBin(Math.round((obj.ecc||0)*1e7),23),
+  ];
+  const binContent=binLines.join('\n');
+  document.getElementById('dp-binary').innerHTML=binContent+'<br>'+binContent;
+
+  // Debris / collision-risk warning
+  const warningEl=document.getElementById('dp-warning');
+  if(obj.type===2){
+    warningEl.textContent='\u26a0 TRACKABLE DEBRIS \u2014 UNCONTROLLED OBJECT';
+    warningEl.style.display='block';
+  } else if(obj.alt<600&&obj.type!==2){
+    warningEl.textContent='\u26a0 LOW ORBIT \u2014 ELEVATED COLLISION RISK ZONE';
+    warningEl.style.display='block';
+  } else {
+    warningEl.textContent='';
+    warningEl.style.display='none';
+  }
+  document.getElementById('dp-purpose').textContent=meta?.note||'';
+}
+
+// ── Target selection ──────────────────────────────────────────────────────────
+function selectTarget(retry){
+  const sunDir=computeSunECI(); // current real sun direction
+  // Only target objects that exist at the current simTime
+  const candidates=objects.filter(o=>{
+    if(!o.pos) return false;
+    if(recentSet.has(o.norad)) return false;
+    // Only include if launched before current simTime
+    if((o.launchMs||estimateLaunchMs(o.norad)) > simTime) return false;
+    if(o.type===2 && Math.random()>0.08) return false;
+    if(!o.name||o.name==='UNKNOWN'||o.name.startsWith('TBA')||o.name.startsWith('DEB')) return false;
+    return true;
+  });
+  // When in the future, mix in projected satellites as potential targets (~40% chance)
+  if(simTime > NOW_MS){
+    const projCandidates = PROJ_OBJS.filter(o=>{
+      if(o.appearMs>simTime) return false;
+      if(recentSet.has(o.projId)) return false;
+      if(o.type===2 && Math.random()>0.06) return false;
+      return true;
+    });
+    if(projCandidates.length>0 && Math.random()<0.40){
+      const sd=computeSunECI(); const _pv=new THREE.Vector3();
+      const pw=projCandidates.map(o=>{ _pv.set(o.pos[0],o.pos[1],o.pos[2]).normalize(); return Math.max(0.04,_pv.dot(sd)+0.35)*3.5; });
+      const ptot=pw.reduce((a,b)=>a+b,0); let pr=Math.random()*ptot;
+      for(let pi=0;pi<projCandidates.length;pi++){
+        pr-=pw[pi]; if(pr<=0){
+          const chosen=projCandidates[pi];
+          recentSet.add(chosen.projId);
+          if(recentSet.size>25) recentSet.delete(recentSet.values().next().value);
+          return chosen;
+        }
+      }
+    }
+  }
+  if(!candidates.length){
+    // Try once more with the recently-seen list cleared; if still nothing, let the
+    // caller pick a new date instead of recursing forever (which froze the page).
+    if(retry) return null;
+    recentSet.clear(); return selectTarget(true);
+  }
+
+  const _np=new THREE.Vector3();
+  const weights=candidates.map(o=>{
+    let w=1.0;
+    if(o.type===1) w*=2.0;
+    if(o.alt>33000&&o.alt<38000) w*=3.0; // GEO belt
+    if(o.inc>1.3) w*=1.5; // highly inclined
+    if(META[o.norad]) w*=10.0; // known notable satellite — strong preference
+    if(o.type===2) w*=4.0;      // debris — surface it more heavily
+    // Strongly prefer sunlit objects — dot product with sun dir
+    // lit=+1 means full sunlight, lit=-1 means deep shadow
+    _np.set(o.pos[0],o.pos[1],o.pos[2]).normalize();
+    const lit=_np.dot(sunDir); // -1 to +1
+    w*=Math.max(0.04, lit+0.35)*3.5; // shadow objects get ~4% the weight of lit ones
+    return w;
+  });
+  const tot=weights.reduce((a,b)=>a+b,0);
+  let r=Math.random()*tot;
+  for(let i=0;i<candidates.length;i++){
+    r-=weights[i];
+    if(r<=0){
+      const t=candidates[i];
+      recentSet.add(t.norad);
+      if(recentSet.size>25) recentSet.delete(recentSet.values().next().value);
+      return t;
+    }
+  }
+  // Early sats are visual-only — not targetable (avoids camera/data issues)
+  if(!candidates.length) return null;
+  return candidates[0];
+}
+
+// ── Project 3D → 2D screen ────────────────────────────────────────────────────
+const _sv=new THREE.Vector3();
+function getScreenPos(worldX,worldY,worldZ){
+  _sv.set(worldX,worldY,worldZ);
+  _sv.project(camera);
+  return{x:(_sv.x+1)*innerWidth*0.5, y:(1-_sv.y)*innerHeight*0.5, z:_sv.z};
+}
+
+// Compute world-space position of object using Three.js Euler (correct)
+const _wv=new THREE.Vector3();
+function objectWorldPos(obj){
+  _wv.set(obj.pos[0],obj.pos[1],obj.pos[2]);
+  _wv.applyEuler(scene.rotation);
+  return _wv.clone();
+}
+
+// ── Reticle ───────────────────────────────────────────────────────────────────
+const reticle=document.getElementById('reticle');
+const retLabel=document.getElementById('reticle-label');
+const retNorad=document.getElementById('reticle-norad');
+
+function updateReticle(){
+  if(!currentTarget) return;
+  const wp=objectWorldPos(currentTarget);
+  const sp=getScreenPos(wp.x,wp.y,wp.z);
+  if(sp.z>1){reticle.style.opacity='0';return;}
+
+  const dist=camera.position.distanceTo(wp);
+  const size=Math.max(28, Math.min(90, 800/dist));
+  reticle.style.width=size+'px';
+  reticle.style.height=size+'px';
+  reticle.style.left=(sp.x-size/2)+'px';
+  reticle.style.top=(sp.y-size/2)+'px';
+  reticle.style.opacity='1';
+  retNorad.textContent='#'+(currentTarget.norad||'—');
+}
+
+// ── Binary scroll background ──────────────────────────────────────────────────
+function buildBinaryScroll(){
+  function toBin(n,b){return(Math.abs(n)>>>0).toString(2).padStart(b,'0');}
+  const lines=objects.slice(0,300).map(o=>
+    toBin(o.norad||0,17)+' '+toBin(Math.round(o.alt)||0,14)+' '+toBin(Math.round((o.inc||0)*1000),16)
+  );
+  const content=lines.join('\n');
+  document.getElementById('binary-inner').textContent=content+'\n'+content;
+}
+
+// ── State machine transitions ─────────────────────────────────────────────────
+const LOCK_DUR    = 2200;
+const ZOOMIN_DUR  = 4500;
+const ZOOMOUT_DUR = 4200;
+const LERP = 0.016;
+
+function goDateSlide(){
+  if(pendingDaily) applyDailyRefresh();   // swap in the new day's catalog between targets
+  slideFromMs = simTime;
+  slideToMs   = chooseNextDate();
+  state=S.DATE_SLIDE; stateMs=0;
+  document.getElementById('state-label').textContent='SCANNING';
+  document.getElementById('tl-era').textContent=currentEraLabel || (simTime<NOW_MS?'← PAST':'PROJECTED →');
+}
+
+function goOrbit(){
+  state=S.ORBIT; stateMs=0;
+  orbitDur = 4000 + Math.random()*5000; // shorter orbit between dates
+  document.getElementById('data-panel').style.opacity='0';
+  reticle.style.opacity='0';
+  document.getElementById('state-label').textContent='';
+  camPos.set(0,0,18); camLook.set(0,0,0);
+}
+
+function goLock(){
+  if(!objects.length) return;
+  currentTarget=selectTarget();
+  if(!currentTarget){
+    // No targets at this date — pick a new date instead of looping
+    simTime=slideToMs; goDateSlide(); return;
+  }
+  frozenRotY=scene.rotation.y; // freeze rotation
+  state=S.LOCK; stateMs=0;
+  retLabel.textContent='OBJECT DESIGNATED';
+  document.getElementById('state-label').textContent='LOCKING TARGET';
+  updateReticle();
+}
+
+function goZoomIn(){
+  state=S.ZOOM_IN; stateMs=0;
+  document.getElementById('state-label').textContent='APPROACHING';
+  // Compute zoom position in world space
+  const wp=objectWorldPos(currentTarget);
+  const dist=wp.length();
+  const dir=wp.clone().normalize();
+
+  // Camera always approaches from OUTSIDE the satellite orbit, looking back toward Earth.
+  // This keeps every orbital shell (LEO through GEO) visible in the frame.
+  const camDist = Math.max(3.5, Math.min(dist*1.25+1.2, 17.0));
+  camPos.copy(dir.clone().multiplyScalar(camDist));
+  camLook.copy(wp.clone()); // satellite centered; full orbital cloud visible behind it
+  if(currentTarget.isProjected){
+    buildProjectedDataPanel(currentTarget);
+  } else {
+    buildDataPanel(currentTarget);
+  }
+}
+
+function goInspect(){
+  state=S.INSPECT; stateMs=0;
+  inspectDur = 14000 + Math.random()*8000;
+  // Only show data panel on-screen if info mode is active
+  if(infoMode) document.getElementById('data-panel').style.opacity='1';
+  document.getElementById('state-label').textContent='TRANSMITTING DATA';
+  // Always push to Supabase so companion app stays live
+  writeTargetToWorker(currentTarget);
+}
+
+function goZoomOut(){
+  state=S.ZOOM_OUT; stateMs=0;
+  document.getElementById('data-panel').style.opacity='0'; // always hide during zoom-out
+  document.getElementById('state-label').textContent='RELEASING';
+  camPos.set(0,0,18); camLook.set(0,0,0);
+}
+
+// ── Real-time sun direction (ECI J2000) ─────────────────────────────────────────
+// Returns actual sun position for the current date/time so the terminator
+// matches the real day/night boundary on Earth.
+function computeSunECI(t){
+  const JD=(t||Date.now())/86400000+2440587.5;
+  const T=(JD-2451545.0)/36525;
+  const L0=(280.46646+36000.76983*T)%360;
+  const M=((357.52911+35999.05029*T)%360)*Math.PI/180;
+  const C=(1.914602-0.004817*T)*Math.sin(M)+0.019993*Math.sin(2*M);
+  const lon=(L0+C)*Math.PI/180;
+  const eps=(23.439-0.0000004*T)*Math.PI/180;
+  return new THREE.Vector3(Math.cos(lon),Math.cos(eps)*Math.sin(lon),Math.sin(eps)*Math.sin(lon)).normalize();
+}
+
+// ── Autonomous live catalog loader ──────────────────────────────────────────
+// Order: 1) this browser's cache (24 h)  2) the site's /api/catalog proxy (Space-Track,
+// full catalog incl. debris)  3) CelesTrak GP "active" group  4) bundled v3 snapshot.
+// The cache is a slimmed copy kept in IndexedDB: the ~33,000-object catalog is too big
+// for localStorage (~5 MB), so v4's cache never actually saved.
+const CATALOG_CACHE_KEY = 'crowded-sky-catalog-v5';
+const CATALOG_CACHE_TTL = 24*60*60*1000; // 24 hours
+const CELESTRAK_GP = 'https://celestrak.org/NORAD/elements/gp.php';
+try{ localStorage.removeItem('crowded-sky-catalog-v2'); }catch(e){}
+
+const SLIM_FIELDS = ['NORAD_CAT_ID','OBJECT_NAME','OBJECT_ID','OBJECT_TYPE','COUNTRY_CODE','LAUNCH_DATE','EPOCH',
+  'MEAN_MOTION','ECCENTRICITY','INCLINATION','RA_OF_ASC_NODE','ARG_OF_PERICENTER','MEAN_ANOMALY'];
+const slimGP = gp => SLIM_FIELDS.map(f=>gp[f]??null);
+const unslimGP = a => Object.fromEntries(SLIM_FIELDS.map((f,i)=>[f,a[i]]));
+function idb(mode, fn){
+  return new Promise((res,rej)=>{
+    const open=indexedDB.open('crowded-sky',1);
+    open.onupgradeneeded=()=>open.result.createObjectStore('kv');
+    open.onerror=()=>rej(open.error);
+    open.onsuccess=()=>{ const db=open.result, tx=db.transaction('kv',mode), st=tx.objectStore('kv');
+      const r=fn(st); tx.oncomplete=()=>{ db.close(); res(r&&r.result); }; tx.onerror=()=>{ db.close(); rej(tx.error); }; };
+  });
+}
+const cacheGet = key => idb('readonly', st=>st.get(key));
+const cachePut = (key,val) => idb('readwrite', st=>st.put(val,key));
+function saveCatalogCache(gpList){
+  cachePut(CATALOG_CACHE_KEY, {ts:Date.now(), rows:gpList.map(slimGP)})
+    .then(()=>console.log(`[Crowded Sky] Catalog cached (${gpList.length} objects)`))
+    .catch(e=>console.warn('[Crowded Sky] Catalog cache not saved:', e && e.message));
+}
+
+// Space-Track / CelesTrak country codes → readable owner
+const COUNTRY_CODES = {US:'USA',PRC:'China',CIS:'Russia / former USSR',UK:'United Kingdom',FR:'France',JPN:'Japan',IND:'India',
+  ESA:'ESA',EUME:'Europe / EUMETSAT',EUTE:'Europe / Eutelsat',GER:'Germany',IT:'Italy',CA:'Canada',SKOR:'South Korea',
+  ISRA:'Israel',BRAZ:'Brazil',AUS:'Australia',SES:'Luxembourg / SES',ITSO:'Intelsat',IM:'Inmarsat',GLOB:'Globalstar',
+  ORB:'Orbcomm',O3B:'O3b / SES',SPN:'Spain',NOR:'Norway',SWED:'Sweden',UAE:'United Arab Emirates',TURK:'Turkey',
+  IRAN:'Iran',ARGN:'Argentina',MEX:'Mexico',INDO:'Indonesia',THAI:'Thailand',TWN:'Taiwan',NKOR:'North Korea',
+  SAUD:'Saudi Arabia',KAZ:'Kazakhstan',UKR:'Ukraine',NZ:'New Zealand',FIN:'Finland',LUXE:'Luxembourg',ISS:'ISS partners'};
+
+// Launch date: catalog LAUNCH_DATE, else the year in the international designator
+// (OBJECT_ID "1998-067A"), else the old NORAD-range estimate.
+function launchMsFor(gp, norad){
+  if(gp.LAUNCH_DATE){ const t=Date.parse(gp.LAUNCH_DATE); if(isFinite(t)) return t; }
+  const m=/^(\d{4})-(\d{3})/.exec(gp.OBJECT_ID||'');
+  if(m){ const y=+m[1], n=+m[2]; return Date.UTC(y,0,1)+Math.min(0.98,n/120)*YEAR_MS; } // launch number ≈ position in year
+  return estimateLaunchMs(norad);
+}
+
+function gpToObject(gp, now){
+  const norad=parseInt(gp.NORAD_CAT_ID);
+  if(!norad||!gp.MEAN_MOTION) return null;
+  const mm=parseFloat(gp.MEAN_MOTION);
+  const sma=smaFromMM(mm);
+  if(sma<1.03||sma>10) return null;
+  const inc=parseFloat(gp.INCLINATION)*Math.PI/180;
+  const raan=parseFloat(gp.RA_OF_ASC_NODE)*Math.PI/180;
+  const argp=parseFloat(gp.ARG_OF_PERICENTER)*Math.PI/180;
+  const M0=parseFloat(gp.MEAN_ANOMALY)*Math.PI/180;
+  const ecc=parseFloat(gp.ECCENTRICITY||0);
+  const epoch_ms=Date.parse(/Z$|[+-]\d\d:?\d\d$/.test(gp.EPOCH)?gp.EPOCH:gp.EPOCH+'Z');
+  const pos=propagate({sma,ecc,inc,raan,argp,mm,M0,epoch_ms},now);
+  if(!pos||isNaN(pos[0])) return null;
+  const name=(gp.OBJECT_NAME||'UNKNOWN').trim();
+  const type=META[norad] ? 1 : guessType(name, gp.OBJECT_TYPE);   // notable list = government/science missions
+  const alt=(sma*6371)-6371;
+  const launchMs=launchMsFor(gp,norad);
+  const country=COUNTRY_CODES[gp.COUNTRY_CODE] || (gp.COUNTRY_CODE && gp.COUNTRY_CODE!=='TBD' ? gp.COUNTRY_CODE : null);
+  const launchExact=!!(gp.LAUNCH_DATE && isFinite(Date.parse(gp.LAUNCH_DATE)));
+  return {pos,type,alt,name,norad,inc,raan,argp,ecc,sma,mm,M0,epoch_ms,launchMs,launchExact,country,col:typeColor(type)};
+}
+
+function initObjects(objs){
+  const lm=document.getElementById("loading-msg");
+  if(lm) lm.style.display="none";
+  objects=objs.filter(Boolean);
+  knownNorads=new Set(objects.map(o=>o.norad));
+  objects.sort((a,b)=>(a.norad||999999)-(b.norad||999999));
+  lastRingCount=-1;
+  rebuildGeometry();
+  initProjectedSatellites(); // build projection from real catalog counts
+  if(!refreshScheduled){ refreshScheduled=true; scheduleLiveRefresh(); }
+}
+let refreshScheduled=false;
+
+async function fetchJSONList(url, ms){
+  const r=await fetch(url,{signal:AbortSignal.timeout(ms)});
+  if(!r.ok) throw new Error('HTTP '+r.status);
+  const d=await r.json();
+  if(!Array.isArray(d)) throw new Error('not a list');
+  return d;
+}
+
+async function loadStaticSnapshot(){
+  return fetchJSONList('../orbital_data_v3.json?v=3', 30000);
+}
+
+async function loadCatalog(){
+  const now=Date.now();
+
+  // 1. This browser's cache
+  try{
+    const cached=await cacheGet(CATALOG_CACHE_KEY);
+    if(cached&&cached.ts&&(now-cached.ts)<CATALOG_CACHE_TTL&&cached.rows?.length>100){
+      console.log(`[Crowded Sky] Using cached catalog (${cached.rows.length} objects, ${Math.round((now-cached.ts)/3600000)}h old)`);
+      initObjects(cached.rows.map(a=>gpToObject(unslimGP(a),now)));
+      return;
+    }
+  }catch(e){}
+
+  // 2–4. Live sources, then the bundled snapshot
+  const sources=[
+    ['proxy',     ()=>fetchJSONList('/api/catalog', 15000)],
+    ['celestrak', ()=>fetchJSONList(`${CELESTRAK_GP}?GROUP=active&FORMAT=json`, 15000)],
+    ['snapshot',  loadStaticSnapshot],
+  ];
+  for(const [label,get] of sources){
+    try{
+      const gp=await get();
+      if(gp.length<100) throw new Error('only '+gp.length+' objects');
+      console.log(`[Crowded Sky] Catalog from ${label}: ${gp.length} objects`);
+      if(label!=='snapshot') saveCatalogCache(gp);
+      initObjects(gp.map(g=>gpToObject(g,now)));
+      return;
+    }catch(e){ console.warn(`[Crowded Sky] ${label} failed:`, e.message); }
+  }
+  const lm=document.getElementById('loading-msg');
+  if(lm) lm.textContent='ORBITAL DATA UNAVAILABLE · RETRYING';
+  setTimeout(loadCatalog, 60000);
+}
+
+// ── Daily refresh — keeps a long-running gallery screen genuinely current ─────
+// Once a day: download the full catalog again (fresh orbital elements; objects that
+// have re-entered disappear), move 'today' and the ten-year horizon forward, and
+// rebuild the projection from the new counts. The new data is prepared in the
+// background and swapped in at the start of the next date slide, between targets,
+// so the observer is never interrupted mid-approach.
+const DAILY_MS = 24*60*60*1000;
+let pendingDaily = null;
+async function prepareDailyRefresh(){
+  const now = Date.now();
+  for(const [label,get] of [
+    ['proxy',     ()=>fetchJSONList('/api/catalog', 30000)],
+    ['celestrak', ()=>fetchJSONList(`${CELESTRAK_GP}?GROUP=active&FORMAT=json`, 30000)],
+  ]){
+    try{
+      const gp = await get();
+      if(gp.length < 1000) throw new Error('only '+gp.length+' objects');
+      saveCatalogCache(gp);
+      pendingDaily = { objs: gp.map(g=>gpToObject(g,now)), source: label, count: gp.length };
+      console.log(`[Crowded Sky] Daily refresh ready from ${label}: ${gp.length} objects (applies at next date slide)`);
+      setTimeout(prepareDailyRefresh, DAILY_MS);
+      return;
+    }catch(e){ console.warn(`[Crowded Sky] Daily refresh ${label} failed:`, e.message); }
+  }
+  setTimeout(prepareDailyRefresh, 60*60*1000);   // both sources down: try again in an hour, keep the current sky
+}
+function applyDailyRefresh(){
+  const p = pendingDaily; pendingDaily = null;
+  NOW_MS = Date.now();
+  SIM_END_MS = NOW_MS + 10*YEAR_MS;
+  for(const m of DATE_MILESTONES) if(m.yearsAhead!=null) m.ms = NOW_MS + m.yearsAhead*YEAR_MS;
+  document.querySelector('.tl-end.right').textContent = new Date(SIM_END_MS).getUTCFullYear();
+  recentSet.clear();
+  currentTarget = null; reticle.style.opacity = '0';   // old object references are replaced below
+  initObjects(p.objs);              // rebuilds geometry and the projection from the new counts
+  console.log(`[Crowded Sky] Daily refresh applied: ${objects.length} objects, horizon ${new Date(SIM_END_MS).toISOString().slice(0,10)}`);
+}
+setTimeout(prepareDailyRefresh, DAILY_MS);
+
+// ── Periodic live refresh — every 2 h, CelesTrak's "last 30 days" group ──────
+// adds newly catalogued objects to the sky and announces them.
+function scheduleLiveRefresh(){
+  setTimeout(async ()=>{
+    try{
+      const gpData=await fetchJSONList(`${CELESTRAK_GP}?GROUP=last-30-days&FORMAT=json`, 15000);
+      let added=0;
+      const now=Date.now();
+      for(const gp of gpData){
+        const norad=parseInt(gp.NORAD_CAT_ID);
+        if(knownNorads.has(norad)) continue;
+        const obj=gpToObject(gp,now);
+        if(!obj) continue;
+        objects.push(obj);
+        knownNorads.add(norad);
+        added++;
+      }
+      if(added>0){
+        objects.sort((a,b)=>(a.norad||999999)-(b.norad||999999));
+        lastRingCount=-1;
+        rebuildGeometry();
+        flashNewObject(added);
+      }
+      // Let the next page load fetch a fresh full catalog
+      try{ const c=await cacheGet(CATALOG_CACHE_KEY); if(c){ c.ts=0; await cachePut(CATALOG_CACHE_KEY,c); } }catch(e){}
+    }catch(e){ console.warn('[Crowded Sky] Live refresh failed:', e.message); }
+    // New calendar year → rebuild the projection from the current catalog
+    if(!projSummary || projSummary.year!==new Date().getUTCFullYear()) initProjectedSatellites();
+    scheduleLiveRefresh(); // loop every 2h
+  }, 2*60*60*1000);
+}
+
+loadCatalog(); // kick off autonomous loading
+
+function guessType(name, objectType){
+  const ot=(objectType||'').toUpperCase();
+  if(ot==='DEBRIS'||ot==='ROCKET BODY') return 2;
+  const n=name.toUpperCase();
+  if(!ot && (n.includes(' DEB')||n.includes('R/B')||n.includes('DEBRIS'))) return 2;
+  const govKeywords=[
+    // USA civil/science
+    'NASA','NOAA','GOES','LANDSAT','TERRA','AQUA','AURA','SUOMI','JPSS','DSCOVR',
+    'ACE','WIND','STEREO','SDO','SOHO','TESS','CYGNUS','NUSTAR','SWIFT','FERMI',
+    'HST','NPP','CXO','ISS','ICESAT','GLAST','IXPE','SMAP','OCO','GPM','CALIPSO','CLOUDSAT',
+    // USA military
+    'USA-','NRO','GPS','NAVSTAR','DMSP','SBIRS','DSP','MILSTAR','AEHF','MUOS',
+    'WGS','FLTSATCOM','UFO','DSCS','LDREX',
+    // Russia
+    'COSMOS','KOSMOS','GLONASS','GONETS','MOLNIYA','MERIDIAN','LUCH','BARS-M',
+    'ELEKTRO','KANOPUS','RESURS','PERSONA','LOTOS','PARUS','STRELA','RADUGA',
+    'EKSPRESS','GORIZONT','URAGAN','FOTON',
+    // China
+    'YAOGAN','BEIDOU','FENGYUN','TIANHUI','CBERS','SHIJIAN','SHIYAN','TJS',
+    'TIANGONG','TIANZHOU','SHENZHOU','GAOFEN','ZIYUAN','HAIYANG','HUANJING',
+    // Europe
+    'SENTINEL','METEOSAT','METOP','ERS','ENVISAT','SPOT','HELIOS','PLEIADES',
+    'GALILEO','AEOLUS','SMOS','SWARM','CRYOSAT','GOCE','GRACE','CLUSTER',
+    'PROBA','MSG','MTG','JASON','COPERNICUS',
+    // UK military
+    'SKYNET',
+    // France military
+    'SYRACUSE','CSO',
+    // India
+    'IRNSS','NAVIC','CARTOSAT','RESOURCESAT','RISAT','OCEANSAT','INSAT',
+    'GSAT','SCATSAT','SARAL',
+    // Japan
+    'ALOS','DAICHI','HIMAWARI','MICHIBIKI','QZSS','IGS',
+    // Other
+    'RADARSAT','SCISAT','NIMBUS','LANDSAT',
+  ];
+  // Whole words only: v4's substring test made 'ACE' match SPACEBEE, and a word-start
+  // test still made 'NIMBUS' match the commercial LEMUR 2 NIMBUS2000.
+  const words=' '+n.replace(/[^A-Z0-9]+/g,' ').trim()+' ';
+  if(govKeywords.some(k=>words.includes(' '+k.replace(/[^A-Z0-9]+/g,' ').trim()+' '))) return 1;
+  return 0;
+}
+
+function flashNewObject(count){
+  const el=document.getElementById('new-obj-banner');
+  el.textContent=`⬤ ${count} NEW OBJECT${count>1?'S':''} DETECTED`;
+  el.style.opacity='1';
+  setTimeout(()=>el.style.opacity='0', 3500);
+}
+
+// ── Clock ─────────────────────────────────────────────────────────────────────
+setInterval(()=>{
+  document.getElementById('clock').textContent=
+    new Date().toISOString().slice(0,19).replace('T',' ')+' UTC';
+},1000);
+
+// ── Render loop ───────────────────────────────────────────────────────────────
+let lastT=performance.now();
+let autoY=0;
+const ROT_X=0.22;
+const _originPos=new THREE.Vector3(0,0,18);
+const _originLook=new THREE.Vector3(0,0,0);
+const _sunDir=new THREE.Vector3();
+
+
+// ── Emergence source: simplex noise + animated voronoi ────────────────────────
+// Lifted verbatim from William Watkins' fxhashgenesis/288399 shaders.js
+const _snoise2D = `
+  vec3 _perm(vec3 x){ return mod(((x*34.)+1.)*x, 289.); }
+  float snoise2(vec2 v){
+    const vec4 C=vec4(0.211324865405187,0.366025403784439,-0.577350269189626,0.024390243902439);
+    vec2 i=floor(v+dot(v,C.yy)),x0=v-i+dot(i,C.xx),i1;
+    i1=(x0.x>x0.y)?vec2(1.,0.):vec2(0.,1.);
+    vec4 x12=x0.xyxy+C.xxzz; x12.xy-=i1;
+    i=mod(i,289.);
+    vec3 p=_perm(_perm(i.y+vec3(0.,i1.y,1.))+i.x+vec3(0.,i1.x,1.));
+    vec3 m=max(.5-vec3(dot(x0,x0),dot(x12.xy,x12.xy),dot(x12.zw,x12.zw)),0.);
+    m=m*m; m=m*m;
+    vec3 x=2.*fract(p*C.www)-1., h=abs(x)-.5, ox=floor(x+.5), a0=x-ox;
+    m*=1.79284291400159-.85373472095314*(a0*a0+h*h);
+    vec3 g; g.x=a0.x*x0.x+h.x*x0.y; g.yz=a0.yz*x12.xz+h.yz*x12.yw;
+    return 130.*dot(m,g);
+  }
+  vec2 rand2(vec2 p){ return fract(sin(vec2(dot(p,vec2(127.1,311.7)),dot(p,vec2(269.5,183.3))))*43758.5453); }
+  float voronoi_em(vec2 st, float temp, float t){
+    vec2 i_st=floor(st), f_st=fract(st); float m=1.;
+    for(int y=-1;y<=1;y++) for(int x=-1;x<=1;x++){
+      vec2 nb=vec2(float(x),float(y)), pt=rand2(i_st+nb);
+      pt=.5+.5*sin(temp*t+6.2831*pt);
+      float d=length(nb+pt-f_st);
+      m=min(m,d);
+    }
+    return m;
+  }
+`;
+
+// ── Test 4: Curl noise warp on orbital rings — Emergence simplex in vertex ────
+// Replace rMat with a version that displaces ring positions using simplex curl
+rMat.vertexShader = _snoise2D + `
+  uniform vec3 uSunDir;
+  uniform float uNoiseTime;
+  attribute vec3 color; varying vec3 vC;
+  void main(){
+    vec3 p = position;
+    // Curl-noise displacement: sample noise at slightly offset positions
+    // gives a divergence-free velocity field (magnetic field lines aesthetic)
+    float eps = 0.08;
+    float nx0 = snoise2(vec2(p.y+eps, p.z) * 0.6 + uNoiseTime);
+    float nx1 = snoise2(vec2(p.y-eps, p.z) * 0.6 + uNoiseTime);
+    float ny0 = snoise2(vec2(p.x, p.z+eps) * 0.6 + uNoiseTime);
+    float ny1 = snoise2(vec2(p.x, p.z-eps) * 0.6 + uNoiseTime);
+    float nz0 = snoise2(vec2(p.x+eps, p.y) * 0.6 + uNoiseTime);
+    float nz1 = snoise2(vec2(p.x-eps, p.y) * 0.6 + uNoiseTime);
+    // Curl = (dn/dy - dn/dz, dn/dz - dn/dx, dn/dx - dn/dy)
+    vec3 curl = vec3(
+      (nx0-nx1)/(2.*eps),
+      (ny0-ny1)/(2.*eps),
+      (nz0-nz1)/(2.*eps)
+    );
+    // Apply small curl displacement (distorts orbital rings organically)
+    float r = length(p);
+    float altFac = smoothstep(1.5, 6.0, r); // less displacement at LEO
+    p += curl * 0.06 * altFac;
+    // Sun lighting
+    vec3 wp=normalize((modelMatrix*vec4(p,1.)).xyz);
+    float lit=smoothstep(-0.18,0.18,dot(wp,uSunDir));
+    vC=color*(0.06+0.94*lit);
+    gl_Position=projectionMatrix*modelViewMatrix*vec4(p,1.);
+  }`;
+rMat.uniforms.uNoiseTime = { value: 0.0 };
+rMat.needsUpdate = true;
+
+// ── Emergence-style dots: per-dot noise pulsing + surface tension rim ────────
+// Add uTime uniform to pMat for per-dot noise animation
+pMat.uniforms.uTime = { value: 0.0 };
+pMat.vertexShader = _snoise2D + `
+  uniform vec3 uSunDir;
+  uniform float uTime;
+  attribute float size; attribute vec3 color; attribute float isDebris;
+  varying vec3 vC; varying float vRim; varying float vIsDebris;
+  void main(){
+    float ph = fract(sin(dot(position, vec3(127.1,311.7,74.7)))*43758.5453);
+    float noise = snoise2(vec2(ph*6.28, uTime*0.4 + ph*12.0));
+    float pulse = 1.0 + 0.35 * noise;
+    float spike = max(0., snoise2(vec2(ph*3.14+uTime*0.8, uTime*0.6)))*0.22;
+    float finalSize = size * (pulse + spike);
+    vec3 wp=normalize((modelMatrix*vec4(position,1.)).xyz);
+    // Flatter lighting — color stays readable on both sun/dark side
+    float lit=smoothstep(-0.3,0.3,dot(wp,uSunDir))*0.35+0.65;
+    vC=color*lit; // no aurora tint — keeps hues clean
+    vRim = 0.5 + 0.5*noise;
+    vIsDebris = isDebris;
+    vec4 mv=modelViewMatrix*vec4(position,1.);
+    gl_PointSize=finalSize*(680./-mv.z);
+    gl_Position=projectionMatrix*mv;
+  }`;
+pMat.fragmentShader = `
+  varying vec3 vC; varying float vRim; varying float vIsDebris;
+  void main(){
+    vec2 u = gl_PointCoord - 0.5;
+    // ── Debris: render as cluster of 3 tiny dots ──────────────────────────
+    if(vIsDebris > 0.5){
+      vec2 c1 = vec2( 0.00, -0.19);
+      vec2 c2 = vec2(-0.17,  0.10);
+      vec2 c3 = vec2( 0.17,  0.10);
+      float r = 0.11;
+      float d1=length(u-c1), d2=length(u-c2), d3=length(u-c3);
+      float dMin = min(d1, min(d2, d3));
+      if(dMin > r) discard;
+      float fade = (1.0 - dMin/r) * 0.85;
+      gl_FragColor = vec4(vC * 0.8, fade);
+      return;
+    }
+    // ── Normal satellite: pulse blob + surface tension rim ────────────────
+    float d=length(u);
+    if(d>.5) discard;
+    float core=1.-smoothstep(.0,.14,d);
+    float glow=1.-smoothstep(.0,.42,d);
+    float rim=smoothstep(.36,.42,d)*smoothstep(.50,.43,d)*vRim;
+    float a=core*0.7 + glow*0.25 + rim*0.6;
+    gl_FragColor=vec4(vC*(0.6+core*0.3+rim*0.2), a*0.82);
+  }`;
+pMat.blending = THREE.AdditiveBlending;
+pMat.needsUpdate = true;
+
+// ── Emergence voronoi+noise background (from test-adam-1) ─────────────────────
+const bgTarget = new THREE.WebGLRenderTarget(1024, 1024,
+  { minFilter: THREE.LinearFilter, magFilter: THREE.NearestFilter });
+const bgCamera = new THREE.OrthographicCamera(-1,1,1,-1,0,1);
+const bgScene  = new THREE.Scene();
+const bgMat    = new THREE.ShaderMaterial({
+  uniforms: { uTime:{value:0}, uTemp:{value:2.8} },
+  vertexShader: `void main(){ gl_Position=vec4(position,1.); }`,
+  fragmentShader: _snoise2D + `
+    uniform float uTime;
+    uniform float uTemp;
+    void main(){
+      vec2 uv = gl_FragCoord.xy/vec2(1024.);
+      uv.y = 1.-uv.y;
+      float v = voronoi_em(uv*6., uTemp, uTime);
+      float n = snoise2(uv*4. + uTime*0.3)*0.4
+              + snoise2(uv*9. - uTime*0.15)*0.2;
+      v = v*0.6 + n*0.4;
+      // Very dark — just enough to feel alive behind the satellites
+      float c = 0.0; // background off
+      gl_FragColor = vec4(0.,0.,0.,1.);
+    }`,
+});
+bgScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2,2), bgMat));
+const fgScene  = new THREE.Scene();
+const fgCamera = new THREE.OrthographicCamera(-1,1,1,-1,0,1);
+const fgMat    = new THREE.ShaderMaterial({
+  uniforms: { uTex:{value:bgTarget.texture} },
+  vertexShader: `varying vec2 vUV; void main(){ vUV=(position.xy+1.)*0.5; gl_Position=vec4(position,1.); }`,
+  fragmentShader: `uniform sampler2D uTex; varying vec2 vUV; void main(){ gl_FragColor = texture2D(uTex,vUV); }`,
+  depthWrite:false,
+});
+fgScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2,2), fgMat));
+
+requestAnimationFrame(function loop(now){
+  requestAnimationFrame(loop);
+  const dt=Math.min(now-lastT,50); lastT=now;
+  stateMs+=dt;
+
+  // simTime is driven by DATE_SLIDE state; keep tlFrac in sync for display
+  tlFrac = simTimeToTlFrac(Math.max(SIM_START_MS, Math.min(SIM_END_MS, simTime)));
+
+  // Update positions every 2 frames
+  frameTick++;
+  if(frameTick%2===0){
+    updatePositions();
+    updateProjectedSatellites();
+  }
+
+  // Update timeline UI
+  const MONTHS=['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+  const sd=new Date(simTime);
+  const todayPct=simTimeToTlFrac(NOW_MS);
+  document.getElementById('tl-cursor').style.left=(tlFrac*100)+'%';
+  document.getElementById('tl-today').style.left=(todayPct*100)+'%';
+  const dateStr=sd.getUTCFullYear()+' '+MONTHS[sd.getUTCMonth()]+' '+String(sd.getUTCDate()).padStart(2,'0');
+  document.getElementById('tl-date').textContent=dateStr;
+  const era = simTime<NOW_MS ? '← PAST' : 'PROJECTED →';
+  document.getElementById('tl-era').textContent=era;
+
+  // Sun direction — use real time (terminator is about now, not sim time)
+  _sunDir.copy(computeSunECI());
+  rMat.uniforms.uSunDir.value.copy(_sunDir);
+  pMat.uniforms.uSunDir.value.copy(_sunDir);
+
+  // autoY always ticks; scene.rotation.y governed by state
+  autoY+=AUTO_SPEED;
+
+  switch(state){
+    case S.DATE_SLIDE:
+      scene.rotation.x=ROT_X;
+      scene.rotation.y=autoY;
+      camera.position.lerp(_originPos,0.04);
+      camLookC.lerp(_originLook,0.04);
+      camera.lookAt(camLookC);
+      { const t=Math.min(1,stateMs/SLIDE_DUR);
+        simTime=slideFromMs+(slideToMs-slideFromMs)*easeInOut(t);
+        // Force position update every frame during slide (sky must change)
+        updatePositions();
+        updateProjectedSatellites();
+        if(t>=1){ simTime=slideToMs; goLock(); }
+      }
+      break;
+
+    case S.ORBIT:
+      scene.rotation.x=ROT_X;
+      scene.rotation.y=autoY;
+      camera.position.lerp(_originPos,0.04);
+      camLookC.lerp(_originLook,0.04);
+      camera.lookAt(camLookC);
+      if(stateMs>orbitDur) goDateSlide();
+      break;
+
+    case S.LOCK:
+      scene.rotation.x=ROT_X;
+      scene.rotation.y=frozenRotY;
+      updateReticle();
+      if(stateMs>LOCK_DUR) goZoomIn();
+      if(stateMs>8000){ goDateSlide(); break; } // stuck guard
+      break;
+
+    case S.ZOOM_IN:
+      scene.rotation.x=ROT_X;
+      scene.rotation.y=frozenRotY;
+      camera.position.lerp(camPos,LERP);
+      camLookC.lerp(camLook,LERP);
+      camera.lookAt(camLookC);
+      updateReticle();
+      if(stateMs>ZOOMIN_DUR) goInspect();
+      break;
+
+    case S.INSPECT:
+      scene.rotation.x=ROT_X;
+      scene.rotation.y=frozenRotY;
+      // Safety: if somehow stuck too long, force new date
+      if(stateMs>35000){ goDateSlide(); break; }
+      camera.position.lerp(camPos,LERP*0.25);
+      camLookC.lerp(camLook,LERP*0.25);
+      camera.lookAt(camLookC);
+      updateReticle();
+      if(stateMs>inspectDur) goZoomOut();
+      break;
+
+    case S.ZOOM_OUT:
+      scene.rotation.x=ROT_X;
+      // Gradually reconnect frozenRotY → autoY in final 40% of zoom-out
+      if(stateMs>ZOOMOUT_DUR*0.6){
+        const t=Math.min(1,(stateMs-ZOOMOUT_DUR*0.6)/(ZOOMOUT_DUR*0.4));
+        frozenRotY=THREE.MathUtils.lerp(frozenRotY,autoY,t*0.06);
+      }
+      scene.rotation.y=frozenRotY;
+      camera.position.lerp(_originPos,LERP);
+      camLookC.lerp(_originLook,LERP);
+      camera.lookAt(camLookC);
+      updateReticle();
+      if(stateMs>ZOOMOUT_DUR){
+        // Sync so ORBIT picks up seamlessly
+        autoY=frozenRotY;
+        currentTarget=null;
+        reticle.style.opacity='0';
+        goDateSlide();
+      }
+      break;
+  }
+
+  // Pulse the target highlight
+  thlMat.uniforms.uTime.value+=0.016;
+
+  // Keep target highlight locked on selected object (always bright, no terminator)
+  if(currentTarget && state!==S.ORBIT){
+    thlPos[0]=currentTarget.pos[0];
+    thlPos[1]=currentTarget.pos[1];
+    thlPos[2]=currentTarget.pos[2];
+    thlGeo.attributes.position.needsUpdate=true;
+    thlMesh.visible=true;
+    // Also force the satellite's own point to full brightness (bypasses terminator dimming).
+    // renderIdx is the object's slot in the draw buffer this frame (set by updatePositions);
+    // its catalog index is a different number once early/future objects are skipped.
+    const ri=currentTarget.renderIdx;
+    if(!currentTarget.isProjected && ri!=null && ri>=0){
+      const ci=ri*3;
+      pCol[ci]=1.0; pCol[ci+1]=0.92; pCol[ci+2]=0.65;
+      pSz[ri]=Math.max(typeSize(currentTarget.type,currentTarget.alt),0.14);
+      pGeo.attributes.color.needsUpdate=true;
+      pGeo.attributes.size.needsUpdate=true;
+    }
+  } else {
+    // updatePositions rewrites every slot's colour, so nothing to restore
+    thlMesh.visible=false;
+  }
+
+
+  rMat.uniforms.uNoiseTime.value = performance.now() * 0.00006;
+  pMat.uniforms.uTime.value = performance.now() * 0.00045;
+
+  // Render voronoi background first, then composite, then main scene
+  bgMat.uniforms.uTime.value = performance.now() * 0.0003;
+  renderer.setRenderTarget(bgTarget);
+  renderer.clear();
+  renderer.render(bgScene, bgCamera);
+  renderer.setRenderTarget(null);
+  renderer.autoClear = true;
+  renderer.render(fgScene, fgCamera);
+  renderer.autoClear = false;
+  renderer.render(scene, camera);
+  renderer.autoClear = true;
+
+});
+
+// ── Resize ─────────────────────────────────────────────────────────────────────
+function onResize(){
+  camera.aspect=innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight);
+  // Update panel width CSS variable based on viewport
+  const pw = Math.max(260, Math.min(360, innerWidth*0.22));
+  document.documentElement.style.setProperty('--panel-w', pw+'px');
+}
+window.addEventListener('resize', onResize);
+
+// ── Timeline scrub ─────────────────────────────────────────────────────
+let tlScrubbing = false;
+
+function tlFracFromEvent(e){
+  const track = document.getElementById('tl-track');
+  const rect  = track.getBoundingClientRect();
+  const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+  return Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+}
+
+function scrubToFrac(frac){
+  simTime = tlFracToSimTime(frac);
+  tlFrac  = frac;
+  // Jump out of whatever state we’re in and just orbit
+  state   = S.ORBIT;
+  stateMs = 0;
+  orbitDur = 999999; // hold indefinitely while scrubbing
+  frozenRotY = scene.rotation.y;
+  document.getElementById('data-panel').style.opacity = '0';
+  reticle.style.opacity = '0';
+  document.getElementById('state-label').textContent = 'MANUAL';
+  updatePositions();
+  updateProjectedSatellites();
+}
+
+const tlEl = document.getElementById('timeline');
+tlEl.addEventListener('mousedown',  e => { tlScrubbing = true;  scrubToFrac(tlFracFromEvent(e)); e.preventDefault(); });
+tlEl.addEventListener('touchstart', e => { tlScrubbing = true;  scrubToFrac(tlFracFromEvent(e)); e.preventDefault(); }, {passive:false});
+window.addEventListener('mousemove',  e => { if(tlScrubbing) scrubToFrac(tlFracFromEvent(e)); });
+window.addEventListener('touchmove',  e => { if(tlScrubbing) scrubToFrac(tlFracFromEvent(e)); }, {passive:false});
+window.addEventListener('mouseup',   () => {
+  if(tlScrubbing){
+    tlScrubbing = false;
+    orbitDur = 4000 + Math.random()*5000; // resume normal orbit then auto-advance
+    stateMs  = 0;
+  }
+});
+window.addEventListener('touchend',  () => {
+  if(tlScrubbing){
+    tlScrubbing = false;
+    orbitDur = 4000 + Math.random()*5000;
+    stateMs  = 0;
+  }
+});
+onResize(); // run once on load
+</script>
+</body>
+</html>

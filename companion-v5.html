@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<title>Crowded Sky — Live</title>
+<style>
+/* Everything is sized in rem so fitToScreen() can shrink the whole card in one step
+   when a long note would otherwise make the page scroll. */
+*{margin:0;padding:0;box-sizing:border-box}
+html{font-size:16px}
+html,body{width:100%;height:100%;background:#000;color:#fff;font-family:'Courier New',monospace;overflow:hidden}
+body{
+  height:100vh;height:100dvh;
+  padding:max(1.25rem, env(safe-area-inset-top)) 1.125rem max(0.875rem, env(safe-area-inset-bottom));
+  display:flex;flex-direction:column;
+}
+
+/* Waiting state */
+#waiting{flex:1;display:flex;flex-direction:column;justify-content:center;gap:1rem}
+#waiting-label{font-size:.625rem;letter-spacing:.3em;color:rgba(255,255,255,0.18);text-transform:uppercase}
+#waiting-dots span{
+  display:inline-block;width:4px;height:4px;border-radius:50%;
+  background:rgba(255,255,255,0.12);margin-right:6px;
+  animation:wdot 1.4s ease-in-out infinite;
+}
+#waiting-dots span:nth-child(2){animation-delay:.2s}
+#waiting-dots span:nth-child(3){animation-delay:.4s}
+@keyframes wdot{0%,80%,100%{transform:scale(.8);opacity:.2}40%{transform:scale(1.3);opacity:.8}}
+
+#sat-data{display:none;flex-direction:column;flex:1;min-height:0}
+
+/* Top row: type badge + era/year */
+#top-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:.75rem}
+#type-badge{
+  font-size:.5rem;letter-spacing:.28em;text-transform:uppercase;
+  padding:.25rem .6rem;border-radius:2px;border:1px solid currentColor;opacity:.75;
+}
+#type-badge.gov   {color:#6ab4ff}
+#type-badge.priv  {color:#ffb84d}
+#type-badge.debris{color:#8a8fa0}
+#type-badge.proj  {color:#cc55ff}
+#sim-year{font-size:.5625rem;letter-spacing:.25em;color:rgba(255,80,0,0.55);text-transform:uppercase}
+
+/* Name */
+#sat-name{font-size:1.5rem;letter-spacing:.05em;text-transform:uppercase;color:#fff;line-height:1.15;margin-bottom:.3rem;word-break:break-word}
+#sat-norad{font-size:.5625rem;letter-spacing:.3em;color:rgba(255,255,255,0.32);margin-bottom:1rem;text-transform:uppercase}
+
+/* Fields: compact 3-column grid */
+#fields{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.7rem .75rem;
+  border-top:1px solid rgba(255,255,255,0.08);padding-top:.85rem}
+.field{min-width:0}
+.field.w2{grid-column:span 2}
+.field.w3{grid-column:span 3}
+.field-label{font-size:.4375rem;letter-spacing:.25em;text-transform:uppercase;color:rgba(255,255,255,0.32);margin-bottom:.2rem}
+.field-value{font-size:.75rem;letter-spacing:.03em;color:rgba(255,255,255,0.88);line-height:1.35;overflow-wrap:anywhere}
+
+/* Warnings */
+#collision-warning{
+  font-size:.4688rem;letter-spacing:.2em;text-transform:uppercase;
+  color:rgba(255,80,0,0.9);margin-top:.85rem;padding:.4rem .55rem;
+  border:1px solid rgba(255,80,0,0.3);display:none;
+}
+#proj-warning{font-size:.4688rem;letter-spacing:.18em;text-transform:uppercase;line-height:1.6;
+  color:rgba(204,85,255,0.65);margin-top:.6rem;display:none}
+
+/* Note / narrative */
+#note{
+  font-size:.6875rem;letter-spacing:.02em;line-height:1.6;color:rgba(255,255,255,0.42);
+  margin-top:.85rem;border-top:1px solid rgba(255,255,255,0.07);padding-top:.75rem;display:none;
+}
+
+/* Footer */
+#footer{margin-top:auto;padding-top:.75rem}
+#artwork-credit{font-size:.4688rem;letter-spacing:.2em;color:rgba(255,255,255,0.14)}
+
+@keyframes fadeIn{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
+.new-data{animation:fadeIn .7s ease forwards}
+</style>
+</head>
+<body>
+
+<!-- Waiting for first target lock -->
+<div id="waiting">
+  <div id="waiting-label">Awaiting target lock</div>
+  <div id="waiting-dots"><span></span><span></span><span></span></div>
+</div>
+
+<!-- Satellite data — hidden until first target arrives -->
+<div id="sat-data">
+  <div id="top-row">
+    <div id="type-badge" class="gov">GOVERNMENT</div>
+    <div id="sim-year"></div>
+  </div>
+  <div id="sat-name">—</div>
+  <div id="sat-norad"></div>
+
+  <div id="fields">
+    <div class="field w3"><div class="field-label">Purpose</div><div class="field-value" id="f-purpose">—</div></div>
+    <div class="field w2"><div class="field-label">Country / Operator</div><div class="field-value" id="f-country">—</div></div>
+    <div class="field"><div class="field-label">Launched</div><div class="field-value" id="f-launched">—</div></div>
+    <div class="field"><div class="field-label">Altitude</div><div class="field-value" id="f-alt">—</div></div>
+    <div class="field"><div class="field-label">Orbital Period</div><div class="field-value" id="f-period">—</div></div>
+    <div class="field"><div class="field-label">Inclination</div><div class="field-value" id="f-inc">—</div></div>
+    <div class="field"><div class="field-label">Eccentricity</div><div class="field-value" id="f-ecc">—</div></div>
+    <div class="field"><div class="field-label">RAAN</div><div class="field-value" id="f-raan">—</div></div>
+    <div class="field orb"><div class="field-label">Mean Anomaly</div><div class="field-value" id="f-m0">—</div></div>
+    <div class="field orb"><div class="field-label">Rev / Day</div><div class="field-value" id="f-mm">—</div></div>
+    <div class="field w2 orb"><div class="field-label">Epoch</div><div class="field-value" id="f-epoch">—</div></div>
+  </div>
+
+  <div id="collision-warning"></div>
+  <div id="proj-warning">⚠ This object does not exist yet — projected from constellation filings. All data is speculative.</div>
+  <div id="note"></div>
+</div>
+
+<div id="footer">
+  <div id="artwork-credit">Crowded Sky · Ashley Zelinskie · 2026</div>
+</div>
+
+<script>
+const WORKER_URL = 'https://crowded-sky.ashleyzelinskie-website.workers.dev';
+
+let lastUpdated = null;
+let isFirstLoad = true;
+
+function animateNewData(){
+  const nameEl = document.getElementById('sat-name');
+  nameEl.classList.remove('new-data');
+  void nameEl.offsetWidth;
+  nameEl.classList.add('new-data');
+}
+
+// Shrink the whole card (all sizes are rem) until it fits the screen without scrolling.
+function fitToScreen(){
+  const root = document.documentElement;
+  let size = 16;
+  root.style.fontSize = size + 'px';
+  while(document.body.scrollHeight > window.innerHeight + 1 && size > 11){
+    size -= 0.5;
+    root.style.fontSize = size + 'px';
+  }
+}
+window.addEventListener('resize', fitToScreen);
+window.addEventListener('orientationchange', ()=>setTimeout(fitToScreen, 300));
+
+function set(id, text){ document.getElementById(id).textContent = text; }
+
+function updateDisplay(data){
+  if(!data) return;
+
+  // Reveal data view, hide waiting state
+  document.getElementById('waiting').style.display = 'none';
+  document.getElementById('sat-data').style.display = 'flex';
+
+  // Type badge. v5 sends projected:true; the other tests keep older feeds working.
+  const badge = document.getElementById('type-badge');
+  const isProjected = data.projected === true
+    || /^PROJ-/.test(String(data.norad || ''))
+    || /PROJECTED/.test(String(data.purpose || '') + String(data.classification || ''));
+  if(isProjected){
+    badge.textContent = 'PROJECTED'; badge.className = 'proj';
+  } else if(data.type === 2){
+    badge.textContent = 'DEBRIS'; badge.className = 'debris';
+  } else if(data.type === 1){
+    badge.textContent = 'GOVERNMENT'; badge.className = 'gov';
+  } else {
+    badge.textContent = 'COMMERCIAL'; badge.className = 'priv';
+  }
+
+  set('sat-name', data.name || '—');
+  set('sat-norad', isProjected
+    ? 'NOT YET CATALOGUED' + (data.constellation ? '  ·  ' + data.constellation : '')
+    : (data.norad ? 'NORAD  ' + data.norad : ''));
+  set('f-purpose',  data.purpose || '—');
+  set('f-country',  data.country || '—');
+  set('f-launched', data.launched || '—');
+  set('f-alt',      data.alt ? data.alt.toLocaleString() + ' km' : '—');
+  set('f-period',   data.period ? data.period + ' min' : '—');
+  set('f-inc',      data.inc != null && data.inc !== '' ? data.inc + '°' : '—');
+  set('f-ecc',      data.ecc || '—');
+  set('f-raan',     data.raan ? data.raan + '°' : '—');
+
+  const hasOrb = !!(data.mm || data.m0 || data.epoch);
+  document.querySelectorAll('.field.orb').forEach(el => el.style.display = hasOrb ? '' : 'none');
+  set('f-mm',    data.mm || '—');
+  set('f-m0',    data.m0 ? data.m0 + '°' : '—');
+  set('f-epoch', data.epoch || '—');
+
+  const collEl = document.getElementById('collision-warning');
+  if(data.warning){ collEl.textContent = '⚠ ' + data.warning; collEl.style.display = 'block'; }
+  else { collEl.style.display = 'none'; }
+
+  const noteEl = document.getElementById('note');
+  noteEl.textContent = data.note || '';
+  noteEl.style.display = data.note ? 'block' : 'none';
+
+  document.getElementById('proj-warning').style.display = isProjected ? 'block' : 'none';
+
+  if(data.sim_year){
+    const yr = data.sim_year;
+    const nowYr = new Date().getFullYear();
+    set('sim-year', yr > nowYr ? 'PROJECTED · ' + yr : yr < nowYr ? 'HISTORICAL · ' + yr : 'PRESENT · ' + yr);
+  }
+
+  fitToScreen();
+  if(!isFirstLoad) animateNewData();
+  isFirstLoad = false;
+  lastUpdated = data.updated_at;
+}
+
+// Poll every 5 s while the page is visible; stop while hidden (phone locked,
+// tab in background) so idle phones don't use up the Worker's daily requests.
+const POLL_MS = 5000;
+let pollTimer = null;
+function schedulePoll(ms){ clearTimeout(pollTimer); if(!document.hidden) pollTimer = setTimeout(poll, ms); }
+document.addEventListener('visibilitychange', ()=>{ if(document.hidden) clearTimeout(pollTimer); else schedulePoll(0); });
+
+async function poll(){
+  try{
+    const r = await fetch(`${WORKER_URL}/target`, {cache:'no-store'});
+    if(r.ok){
+      const data = await r.json();
+      if(data && (data.updated_at !== lastUpdated || isFirstLoad)) updateDisplay(data);
+    }
+  }catch(e){ /* keep showing the last card; try again on the next poll */ }
+  schedulePoll(POLL_MS);
+}
+
+schedulePoll(0);
+</script>
+</body>
+</html>
