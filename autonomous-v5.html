@@ -2874,7 +2874,7 @@ function applyRefinements(){
     // prospective objects leave no mark in the surface: light only
     if(!/attribute vec3 color/.test(h.vertexShader)) h.vertexShader='attribute vec3 color;\n'+h.vertexShader;
     h.vertexShader=h.vertexShader.replace('void main(){','varying float vProj;\nvoid main(){ vProj = step(.25, color.b - color.r);');
-    h.fragmentShader=h.fragmentShader.replace('varying float vDeb;','varying float vDeb; varying float vProj;').replace('void main(){','void main(){ if (vProj > .5) discard;');
+    h.fragmentShader=h.fragmentShader.replace('varying float vDeb;','varying float vDeb; varying float vProj;').replace('void main(){','void main(){ if (vProj > .5 && vT < .5) discard;').replace(/(gl_FragColor = vec4\(h, [^;]*\);)/, '$1 if (vProj > .5) gl_FragColor = vec4(0., 0., h, 1.);');   // a selected prospective target still lights up, as light only
     h.needsUpdate=true;
     o.vertexShader=o.vertexShader.replace('void main(){','varying float vProjL;\nvoid main(){ vProjL = step(.25, color.b - color.r);');
     o.fragmentShader=o.fragmentShader.replace('void main(){','varying float vProjL;\nvoid main(){').replace(/gl_FragColor = vec4\(vC \* ([^;]*)\);/, (m,e)=>'gl_FragColor = vec4(vC * '+e+'); if (vProjL > .5) { vec2 q = gl_PointCoord - .5; float g = exp(-dot(q,q) * 22.); gl_FragColor = vec4(vC * (.9 + .4 * g), g * mix(.75, .16, vOut)); }');
