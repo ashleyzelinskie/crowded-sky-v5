@@ -2112,7 +2112,7 @@ window.__applyStyle = function(variant){
     debris: [0.50, 0.51, 0.54],   // grey              #80828A
     proj:   [0.86, 0.88, 0.92],   // chrome / silver   #DBE0EB
   };
-  const CSS = { gov:'#8FB0E3', priv:'#C48A55', debris:'#8A8F99', proj:'#DBE0EB' };
+  const CSS = { gov:'#C9D1DC', priv:'#BC7B3F', debris:'#8A8F99', proj:'#8FB0E3' };
 
   // ── Dot colours: catalog, early satellites, projections (also after daily refresh) ──
   typeColor = t => t===2 ? PAL.debris : t===1 ? PAL.gov : PAL.priv;
@@ -2706,9 +2706,228 @@ window.__applyRelief = function(opts = {}){
   return 'resolution-independent';
 })();
 }
+// ════════════════════════════════════════════════════════════════════════════
+// Crowded Sky v5 — refinements of 12 Nov 2026 (applied after the exhibition look)
+// Silver (government) · bronze (private) · blue light (prospective, not yet built)
+// ════════════════════════════════════════════════════════════════════════════
+function applyRefinements(){
+  // darker graphite ground
+  __relief.fgMat.uniforms.uGround.value.set(0.24, 0.24, 0.25);
+
+  // no scanlines, no grain
+  (function(){ const s=document.getElementById('scanlines'); if(s) s.style.display='none'; __relief.fgMat.uniforms.uGrain.value=0.0; })();
+
+  // crosshairs: heavier bronze brackets with a dark edge, readable at any zoom
+  (function(){
+    const st=document.createElement('style'); st.id='reticle-visible';
+    st.textContent=
+     '#reticle .corner{width:22px!important;height:22px!important;filter:drop-shadow(0 0 1px rgba(0,0,0,.95)) drop-shadow(0 0 3px rgba(0,0,0,.8)) drop-shadow(0 0 6px rgba(246,220,174,.35))!important}'+
+     '#reticle .tl{border-width:3px 0 0 3px!important} #reticle .tr{border-width:3px 3px 0 0!important}'+
+     '#reticle .bl{border-width:0 0 3px 3px!important} #reticle .br{border-width:0 3px 3px 0!important}'+
+     '#reticle-h,#reticle-v,#reticle-dot{display:none!important}';
+    document.head.appendChild(st);
+    const _u=updateReticle;
+    updateReticle=function(){ _u(); if(reticle.style.width){ const s=Math.max(56, parseFloat(reticle.style.width)); const cx=parseFloat(reticle.style.left)+parseFloat(reticle.style.width)/2, cy=parseFloat(reticle.style.top)+parseFloat(reticle.style.height)/2; reticle.style.width=reticle.style.height=s+'px'; reticle.style.left=(cx-s/2)+'px'; reticle.style.top=(cy-s/2)+'px'; } };
+  })();
+
+  // the selected object lights up itself (marked in the height map's blue channel), no white sprite on top
+  (function(){
+    thlMesh.visible=false;
+    const h=__relief.hMat, f=__relief.fgMat;
+    h.uniforms.uTgtL={value:new THREE.Vector3(1e6,1e6,1e6)};
+    h.vertexShader=h.vertexShader.replace('void main(){','uniform vec3 uTgtL; varying float vT;\nvoid main(){ vT = distance(position, uTgtL) < .0002 ? 1. : 0.;');
+    h.fragmentShader=h.fragmentShader.replace('varying float vDeb;','varying float vDeb; varying float vT;')
+      .replace(/gl_FragColor = vec4\(h, ([^;]*)\);/, (m,rest)=>'gl_FragColor = vec4(h, ' + rest.replace(/^([^,]+),\s*([^,]+),/, '$1, max($2, vT * h),') + ');');
+    h.vertexShader=h.vertexShader.replace(/gl_Position = projectionMatrix \* mv;/, 'gl_PointSize *= 1. + vT * .6; gl_Position = projectionMatrix * mv;');
+    h.needsUpdate=true;
+    f.uniforms.uTgtOn={value:0};
+    f.uniforms.uTgtCol={value:new THREE.Vector3(1,1,1)};
+    f.uniforms.uTgtPx={value:new THREE.Vector2(-1e4,-1e4)};
+    f.uniforms.uTgtR={value:20};
+    f.uniforms.uHalo={value:1};
+    f.fragmentShader=f.fragmentShader.replace('varying vec2 vUV;','varying vec2 vUV; uniform float uTgtOn; uniform vec3 uTgtCol; uniform vec2 uTgtPx; uniform float uTgtR; uniform float uHalo;')
+      .replace('gl_FragColor = vec4(clamp(c, 0., 1.), 1.);',
+        // the target takes on its colour from the foot up, with a soft bloom of the same colour around it
+        'float tb = smoothstep(0., .75, texture2D(uH, vUV).b) * uTgtOn;\n'+
+        '      c = mix(c, uTgtCol * (.6 + .8 * c), tb * .9);\n'+
+        '      float gd = distance(gl_FragCoord.xy, uTgtPx) / (uTgtR * .8);\n'+
+        '      c += uTgtCol * exp(-gd * gd * 1.3) * .22 * uTgtOn * uHalo;\n'+
+        '      gl_FragColor = vec4(clamp(c, 0., 1.), 1.);');
+    f.needsUpdate=true;
+    const buf=new THREE.Vector2(), prev=renderer.render;
+    renderer.render=function(s,cam){
+      thlMesh.visible=false;
+      if(currentTarget && reticle.style.opacity==='1'){
+        const wp=objectWorldPos(currentTarget);
+        h.uniforms.uTgtL.value.copy(scene.worldToLocal(new THREE.Vector3(wp.x,wp.y,wp.z)));
+        f.uniforms.uTgtOn.value=0.8+0.2*Math.sin(performance.now()/450);
+        const C=__pricks.C, col = currentTarget.isProjected ? C.proj : (currentTarget.col || [1,1,1]);
+        f.uniforms.uTgtCol.value.set(col[0],col[1],col[2]);
+        const sp=getScreenPos(wp.x,wp.y,wp.z);
+        renderer.getDrawingBufferSize(buf); const k=buf.x/innerWidth;
+        f.uniforms.uTgtPx.value.set(sp.x*k,(innerHeight-sp.y)*k);
+        f.uniforms.uTgtR.value=Math.max(12,(parseFloat(reticle.style.width)||40)*0.32)*k;
+        f.uniforms.uHalo.value=(currentTarget.type===2 && !currentTarget.isProjected) ? 0 : 1;   // grey debris gets no halo (it reads as fog)
+      } else { f.uniforms.uTgtOn.value=0; h.uniforms.uTgtL.value.set(1e6,1e6,1e6); }
+      return prev.call(this,s,cam);
+    };
+  })();
+
+  // approach each target from the angle with the fewest objects behind and in front of it
+  (function(){
+    const N=64, dirs=[];
+    for (let i=0;i<N;i++){ const y=1-2*(i+.5)/N, rr=Math.sqrt(1-y*y), a=i*2.39996323; dirs.push(new THREE.Vector3(Math.cos(a)*rr, y, Math.sin(a)*rr)); }
+    const COS_BEHIND=Math.cos(THREE.MathUtils.degToRad(9));
+    function score(L,u,d,geos){
+      let s=0;
+      for (const g of geos){
+        const p=g.attributes.position.array, n=Math.min(g.drawRange.count, p.length/3);
+        for (let i=0;i<n;i++){
+          const vx=p[3*i]-L.x, vy=p[3*i+1]-L.y, vz=p[3*i+2]-L.z;
+          const dist=Math.hypot(vx,vy,vz); if(dist<1e-4) continue;
+          const c=(vx*u.x+vy*u.y+vz*u.z)/dist;
+          if (c>COS_BEHIND) s+=1/(1+.25*dist);
+          else if (c<-COS_BEHIND && dist<d) s+=3;
+        }
+      }
+      const b=L.dot(u), cc=L.lengthSq()-1.15*1.15;
+      if (b*b-cc>0 && -b>0) s+=400;          // Earth and its crowded shell behind the target
+      return s;
+    }
+    const _orig=goZoomIn;
+    goZoomIn=function(){
+      _orig();
+      const wp=objectWorldPos(currentTarget);
+      const L=scene.worldToLocal(new THREE.Vector3(wp.x,wp.y,wp.z)), r=L.length();
+      const d=THREE.MathUtils.clamp(0.32*r+0.9, 1.1, 4.5);
+      let best=null, bestS=Infinity;
+      for (const u of dirs){
+        const camL=L.clone().addScaledVector(u,-d);
+        if (camL.length()<1.35) continue;
+        const s=score(L,u,d,[pGeo,projGeo]);
+        if (s<bestS){ bestS=s; best=camL; }
+      }
+      if (!best) return;
+      camPos.copy(scene.localToWorld(best)); camLook.set(wp.x,wp.y,wp.z);
+    };
+  })();
+
+  // softer, feathered relief: a bell-shaped rise whose shading fades out toward its foot
+  (function(){
+    const R=__relief, h=R.hMat, f=R.fgMat;
+    h.fragmentShader=h.fragmentShader.replace('h = bump(u, .5);','{ float dq = length(u) / .5; h = exp(-dq * dq * 4.5) * (1. - smoothstep(.5, 1., dq)); }');
+    h.needsUpdate=true;
+    R.O.sizeMul*=1.7*1.35; if(h.uniforms.maxPx) h.uniforms.maxPx.value*=1.7*1.35;
+    f.fragmentShader=f.fragmentShader.replace('float lit = dot(n, uL) - uL.z;','float lit = dot(n, uL) - uL.z; lit *= smoothstep(0., .65, texture2D(uH, vUV).r);');
+    f.uniforms.uRelief.value*=1.3;
+    f.needsUpdate=true;
+  })();
+
+  // orbit lines: always drawn (the culling bug hid them up close), visible on the night side, a little brighter up close
+  (function(){
+    rMesh.frustumCulled=false;
+    rMat.uniforms.uRingGain={value:2.4};
+    const fs=rMat.fragmentShader, i=fs.lastIndexOf('}');
+    rMat.fragmentShader='uniform float uRingGain;\n'+fs.slice(0,i)+' gl_FragColor.rgb *= uRingGain; '+fs.slice(i);
+    rMat.vertexShader=rMat.vertexShader.replace(/0\.05\s*\+\s*0\.95\s*\*\s*lit/g,'0.35+0.65*lit').replace('vC=color*(0.06+0.94*lit);','vC=color*(0.4+0.6*lit);');
+    rMat.needsUpdate=true;
+    const prev=renderer.render;
+    renderer.render=function(s,c){
+      const d=camera.position.length();
+      rMat.uniforms.uRingGain.value=2.4*(1.+1.0*(1.-THREE.MathUtils.smoothstep(d,3.,16.)));
+      return prev.call(this,s,c);
+    };
+  })();
+
+  // dot size with zoom: less shrink up close; delicate (smaller, lighter shadows) in the overview
+  (function(){
+    const h=__relief.hMat, o=__pricks.oMat, d=__pricks.dMat;
+    h.vertexShader=h.vertexShader.replace('pow(uDist / 18., 0.22)','pow(uDist / 18., 0.14)'); h.needsUpdate=true;
+    for (const m of [o,d]) { if(!m) continue; m.vertexShader=m.vertexShader.replace('pow(uDist / 18., 0.2)','pow(uDist / 18., 0.12)'); m.needsUpdate=true; }
+    const R=__relief, f=R.fgMat, base=R.O.sizeMul, baseRelief=f.uniforms.uRelief.value, prev=renderer.render;
+    renderer.render=function(s,c){
+      const out=THREE.MathUtils.smoothstep(camera.position.length(),5.,16.);
+      R.O.sizeMul=base*(1.-.58*out);
+      f.uniforms.uRelief.value=baseRelief*(1.-.35*out);
+      return prev.call(this,s,c);
+    };
+    // low orbits shrink only in the overview; everything is larger up close
+    const AL=[[h,'.55'],[o,'.75'],[d,'.75']];
+    for (const [m,lo] of AL){
+      if(!m) continue;
+      m.vertexShader=m.vertexShader.replace(/gl_Position = projectionMatrix \* mv;/,
+        'float altS = mix(mix(1., '+lo+', smoothstep(5., 16., uDist)), 1., smoothstep(1.1, 2.6, length(position))); gl_PointSize *= altS * mix(1.48, 1., smoothstep(5., 16., uDist)); gl_Position = projectionMatrix * mv;');
+      m.needsUpdate=true;
+    }
+  })();
+
+  // palette: silver (government), bronze (private), mood-board blue light only (prospective)
+  (function(){
+    const P=__pricks, C=P.C, h=__relief.hMat, o=P.oMat;
+    C.gov=[0.80,0.84,0.90]; C.priv=[0.74,0.46,0.22]; C.proj=[0.56,0.69,0.89];
+    typeColor = t => t===2 ? C.debris : t===1 ? C.gov : C.priv;
+    objects.forEach(x => x.col = typeColor(x.type));
+    EARLY_SATS.forEach(e => e.col = C.gov);
+    PROJ_OBJS.forEach(x => x.col = C.proj);
+    const _ip=initProjectedSatellites; initProjectedSatellites=function(){ _ip(); PROJ_OBJS.forEach(x => x.col = C.proj); };
+    lastRingCount=-1; rebuildGeometry();
+    // prospective objects leave no mark in the surface: light only
+    if(!/attribute vec3 color/.test(h.vertexShader)) h.vertexShader='attribute vec3 color;\n'+h.vertexShader;
+    h.vertexShader=h.vertexShader.replace('void main(){','varying float vProj;\nvoid main(){ vProj = step(.25, color.b - color.r);');
+    h.fragmentShader=h.fragmentShader.replace('varying float vDeb;','varying float vDeb; varying float vProj;').replace('void main(){','void main(){ if (vProj > .5) discard;');
+    h.needsUpdate=true;
+    o.vertexShader=o.vertexShader.replace('void main(){','varying float vProjL;\nvoid main(){ vProjL = step(.25, color.b - color.r);');
+    o.fragmentShader=o.fragmentShader.replace('void main(){','varying float vProjL;\nvoid main(){').replace(/gl_FragColor = vec4\(vC \* ([^;]*)\);/, (m,e)=>'gl_FragColor = vec4(vC * '+e+'); if (vProjL > .5) { vec2 q = gl_PointCoord - .5; float g = exp(-dot(q,q) * 22.); gl_FragColor = vec4(vC * (.9 + .4 * g), g * mix(.75, .16, vOut)); }');
+    o.needsUpdate=true;
+  })();
+
+  // a third of the targets come from a list of notable objects, each with a note for the info tray
+  (function(){
+    const N=[
+      {re:/^ISS \(ZARYA\)$/, purpose:'CREWED SPACE STATION', country:'International (NASA / Roscosmos / ESA / JAXA / CSA)', note:'International Space Station. Continuously crewed since November 2000. About the size of a football field and the largest structure humans have built in space.'},
+      {re:/^CSS \(TIANHE/, purpose:'CREWED SPACE STATION', country:'China / CMSA', note:'Tianhe, the core module of China’s Tiangong space station, launched 2021. Crewed by rotating teams of taikonauts.'},
+      {re:/^SYNCOM 2/, purpose:'COMMUNICATIONS (INACTIVE)', country:'USA / NASA / Hughes', note:'Launched 1963, the first satellite in geosynchronous orbit, keeping pace with Earth’s rotation. Inactive, still in orbit.'},
+      {re:/^SYNCOM 3$/, purpose:'COMMUNICATIONS (INACTIVE)', country:'USA / NASA / Hughes', note:'Launched 1964, the first geostationary satellite, fixed over one spot on the equator. It carried live television of the 1964 Tokyo Olympics to the United States.'},
+      {re:/^HST$/, purpose:'SPACE TELESCOPE', country:'USA / NASA', note:null},
+      {re:/^VANGUARD 1$/, purpose:'SCIENTIFIC SATELLITE (INACTIVE)', country:'USA / US Navy', note:'Launched 1958, the oldest human-made object still in orbit. One of the first satellites to use solar cells; it fell silent in 1964 and will keep circling for centuries.'},
+      {re:/^TELSTAR 1$/, purpose:'COMMUNICATIONS (INACTIVE)', country:'USA / AT&T', note:'Launched 1962, relayed the first live television across the Atlantic. Inactive since 1963, still in orbit.'},
+      {re:/^LAGEOS 1$/, purpose:'GEODESY (LASER RANGING)', country:'USA / NASA', note:'A small sphere covered in mirrors, launched 1976. Lasers bounced off it measure Earth’s shape and the drift of continents. It carries a plaque addressed to people millions of years in the future.'},
+      {re:/^ENVISAT$/, purpose:'EARTH OBSERVATION (DEFUNCT)', country:'ESA', note:'Europe’s largest Earth-observation satellite. Contact was lost in 2012; the eight-tonne spacecraft remains in orbit as one of the largest pieces of debris.'},
+      {re:/^LANDSAT [89]$/, purpose:'EARTH OBSERVATION', country:'USA / NASA / USGS', note:'Part of Landsat, the longest continuous record of Earth’s land surface from space, begun in 1972.'},
+      {re:/^TERRA$/, purpose:'EARTH OBSERVATION', country:'USA / NASA', note:'NASA’s flagship Earth-observing satellite, launched 1999. Tracks land, oceans, atmosphere and climate.'},
+      {re:/^AQUA$/, purpose:'EARTH OBSERVATION', country:'USA / NASA', note:'Studies Earth’s water cycle: oceans, ice, clouds and rainfall. Launched 2002.'},
+      {re:/^AURA$/, purpose:'ATMOSPHERIC SCIENCE', country:'USA / NASA', note:'Monitors the ozone layer, air quality and climate. Launched 2004.'},
+      {re:/^TESS$/, purpose:'EXOPLANET SURVEY', country:'USA / NASA', note:'Transiting Exoplanet Survey Satellite, launched 2018. Watches nearby stars for the tiny dips in light made by passing planets.'},
+      {re:/^(GLAST|FERMI)/, purpose:'GAMMA-RAY TELESCOPE', country:'USA / NASA', note:'Fermi Gamma-ray Space Telescope, launched 2008. Maps the most energetic light in the universe.'},
+      {re:/^ICESAT-2$/, purpose:'ICE MEASUREMENT', country:'USA / NASA', note:'Fires laser pulses at the ground to measure the height of ice sheets and sea ice. Launched 2018.'},
+      {re:/^BLUEWALKER 3$/, purpose:'COMMUNICATIONS TEST', country:'USA / AST SpaceMobile', note:'Launched 2022. Its large antenna array made it one of the brightest objects in the night sky, and a focus of astronomers’ concern about satellite brightness.'},
+      {re:/^NAVSTAR/, purpose:'NAVIGATION (GPS)', country:'USA / US Space Force', note:'Part of the GPS constellation in medium Earth orbit. Every phone map and many bank transfers depend on its clocks.'},
+      {re:/^FENGYUN 1C DEB/, purpose:'DEBRIS (ANTI-SATELLITE TEST)', country:'China', note:'Fragment of a weather satellite destroyed by a Chinese anti-satellite missile test in 2007, the largest debris-creating event on record.'},
+      {re:/^(COSMOS 2251|IRIDIUM 33) DEB/, purpose:'DEBRIS (COLLISION)', country:'Russia / USA', note:'Fragment from the first accidental collision between two intact satellites, Iridium 33 and Cosmos 2251, in February 2009.'},
+      {re:/^COSMOS 1408 DEB/, purpose:'DEBRIS (ANTI-SATELLITE TEST)', country:'Russia', note:'Fragment of a Soviet-era satellite destroyed by a Russian anti-satellite test in November 2021.'},
+    ];
+    let cacheLen=-1, groups=[];
+    function build(){ groups=N.map(e=>({e, objs:objects.filter(o=>o.name&&e.re.test(o.name))})).filter(g=>g.objs.length); cacheLen=objects.length; }
+    const _sel=selectTarget;
+    selectTarget=function(retry){
+      if(cacheLen!==objects.length) build();
+      if(Math.random()<0.35){
+        const avail=groups.map(g=>({g, objs:g.objs.filter(o=>o.pos && !recentSet.has(o.norad) && (o.launchMs||estimateLaunchMs(o.norad))<=simTime)})).filter(x=>x.objs.length);
+        if(avail.length){
+          const x=avail[Math.floor(Math.random()*avail.length)], o=x.objs[Math.floor(Math.random()*x.objs.length)], e=x.g.e;
+          if(e.note && !META[o.norad]) META[o.norad]={purpose:e.purpose, country:e.country, launched:o.launchMs?new Date(o.launchMs).toISOString().slice(0,10):'—', note:e.note};
+          recentSet.add(o.norad); if(recentSet.size>25) recentSet.delete(recentSet.values().next().value);
+          return o;
+        }
+      }
+      return _sel(retry);
+    };
+  })();
+}
+
 (function waitForSky(){
   if (typeof objects !== 'undefined' && objects.length > 0 && typeof renderer !== 'undefined') {
-    try { applyExhibitionLook(); console.log('[Crowded Sky] exhibition look applied'); }
+    try { applyExhibitionLook(); applyRefinements(); console.log('[Crowded Sky] exhibition look applied'); }
     catch(e){ console.error('[Crowded Sky] look failed', e); }
   } else setTimeout(waitForSky, 200);
 })();

@@ -30,3 +30,14 @@ Nothing has been pushed to GitHub or deployed. Everything is local and on branch
    4. Point the QR code at companion-v5.
 
 To resume, reopen this same Claude conversation and say "pick up Crowded Sky v5".
+
+## 12 Nov evening: refinements (built into `applyRefinements()` in autonomous-v5.html)
+- Palette: government silver, private bronze, prospective mood-board blue drawn as light only (no relief: they don't exist yet).
+- Darker graphite ground (24%), no scanlines or grain.
+- Crosshairs: bronze brackets only, no centre cross, and no white sprite over the target.
+- The selected target glows in its own colour (debris: no halo).
+- Camera approaches each target from the angle with the fewest objects behind it.
+- Orbit lines are always drawn (fixed a culling bug that hid them up close), stay visible on the night side, and get a little brighter up close.
+- Feathered relief dots. They are delicate in the overview (smaller, lighter shadows), and low-orbit objects are smaller only when zoomed out. Everything is larger up close.
+- A third of the targets come from a curated list of notable objects, each with a note: ISS, Tiangong, Hubble, Vanguard 1, Telstar 1, Syncom 2/3, LAGEOS, Envisat, Landsat, Terra, Aqua, Aura, Fermi, ICESat-2, BlueWalker 3, GPS, and debris from the 2007/2021 anti-satellite tests and the 2009 collision.
+- Companion badges match: silver, bronze, blue.
